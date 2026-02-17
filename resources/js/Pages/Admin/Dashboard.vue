@@ -51,11 +51,31 @@ const initMap = () => {
         .addTo(map)
         .bindPopup("<b>SEKOLAH (Tujuan)</b>");
 
-    // Looping data armada dan tambahkan titik siswa ke peta
+    // Looping data armada dan tambahkan titik serta garis rute
     props.routesData.forEach((fleet, index) => {
         const fleetColor = colors[index % colors.length];
 
+        // Buat array untuk menampung urutan koordinat jalur mobil ini
+        let routeCoordinates = [];
+
+        // 1. Titik Awal: Pool / Garasi Armada
+        if (fleet.base_lat && fleet.base_lng) {
+            routeCoordinates.push([fleet.base_lat, fleet.base_lng]);
+            
+            // Bikin marker kotak buat Garasi (opsional biar beda sama siswa)
+            L.marker([fleet.base_lat, fleet.base_lng], {
+                icon: L.divIcon({
+                    html: `<div style="background-color: ${fleetColor}; width: 14px; height: 14px; border: 2px solid black;"></div>`,
+                    className: ''
+                })
+            }).addTo(map).bindPopup(`<b>POOL: ${fleet.fleet_name}</b>`);
+        }
+
+        // 2. Titik-Titik Siswa sesuai route_order
         fleet.students.forEach((student) => {
+            // Masukkan koordinat siswa ke jalur rute
+            routeCoordinates.push([student.lat, student.lng]);
+
             L.circleMarker([student.lat, student.lng], {
                 color: fleetColor,
                 fillColor: fleetColor,
@@ -64,9 +84,24 @@ const initMap = () => {
             })
                 .addTo(map)
                 .bindPopup(
-                    `<b>${student.name}</b><br>Ikut: ${fleet.fleet_name}<br>Urutan Jemput: ${student.route_order || '-'}`
+                    `<b>${student.name}</b><br>Ikut: ${fleet.fleet_name}<br>Urutan: ${student.route_order}<br>Jarak dr Pool: ${student.distance_from_base}`
                 );
         });
+
+        // 3. Titik Akhir: Sekolah
+        // Setelah jemput semua anak, mobil pergi ke sekolah
+        routeCoordinates.push([-6.815348, 107.616659]);
+
+        // 4. GAMBAR GARIS RUTENYA (Polyline)
+        // Ini yang bikin skripsimu terlihat punya algoritma routing sungguhan!
+        if (routeCoordinates.length > 1) {
+            L.polyline(routeCoordinates, {
+                color: fleetColor,
+                weight: 3, // Ketebalan garis
+                opacity: 0.8,
+                dashArray: '5, 10' // Bikin garisnya putus-putus biar elegan
+            }).addTo(map);
+        }
     });
 };
 

@@ -17,28 +17,36 @@ class RouteController extends Controller
         $this->optimizer = $optimizer;
     }
 
-    // FUNGSI BACA (Sangat Ringan)
     public function index(Request $request)
     {
-        // Ambil data Armada beserta Siswanya langsung dari Database
         $fleets = Fleet::with(['students' => function($query) {
             $query->orderBy('route_order', 'asc');
         }])->get();
 
-        // Format ulang datanya sedikit agar cocok dengan format Vue sebelumnya
         $routesData = $fleets->map(function($fleet) {
             return [
                 'fleet_id' => $fleet->id,
                 'fleet_name' => $fleet->name,
                 'capacity' => $fleet->capacity,
+                'base_lat' => $fleet->base_latitude,
+                'base_lng' => $fleet->base_longitude,
                 'current_load' => $fleet->students->count(),
-                'students' => $fleet->students->map(function($student) {
+                'students' => $fleet->students->map(function($student) use ($fleet) {
+                    
+                    // Hitung jarak asli dari Base ke Siswa (Haversine)
+                    $earthRadius = 6371;
+                    $dLat = deg2rad($student->latitude - $fleet->base_latitude);
+                    $dLon = deg2rad($student->longitude - $fleet->base_longitude);
+                    $a = sin($dLat/2) * sin($dLat/2) + cos(deg2rad($fleet->base_latitude)) * cos(deg2rad($student->latitude)) * sin($dLon/2) * sin($dLon/2);
+                    $c = 2 * atan2(sqrt($a), sqrt(1-$a));
+                    $distanceKm = round($earthRadius * $c, 2);
+
                     return [
                         'id' => $student->id,
                         'name' => $student->name,
                         'lat' => $student->latitude,
                         'lng' => $student->longitude,
-                        'distance_from_base' => '...', // Bisa dihitung manual atau hide dulu
+                        'distance_from_base' => $distanceKm . ' KM',
                         'route_order' => $student->route_order
                     ];
                 })
