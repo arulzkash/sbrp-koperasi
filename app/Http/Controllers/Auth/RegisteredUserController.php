@@ -13,6 +13,9 @@ use Illuminate\Validation\Rules;
 use Inertia\Inertia;
 use Inertia\Response;
 
+use App\Models\Student;
+use Illuminate\Support\Facades\DB;
+
 class RegisteredUserController extends Controller
 {
     /**
@@ -32,20 +35,46 @@ class RegisteredUserController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:255',
-            'email' => 'required|string|lowercase|email|max:255|unique:'.User::class,
+            'email' => 'required|string|lowercase|email|max:255|unique:' . User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            // Validasi data siswa (optional/nullable kalau dia daftar tanpa lewat peta)
+            'student_name' => 'nullable|string|max:255',
+            'latitude' => 'nullable',
+            'longitude' => 'nullable',
         ]);
 
-        $user = User::create([
-            'name' => $request->name,
-            'email' => $request->email,
-            'password' => Hash::make($request->password),
-        ]);
+        // Pakai Database Transaction biar aman (Kalau gagal satu, gagal semua)
+        DB::transaction(function () use ($request) {
 
-        event(new Registered($user));
+            // 1. Buat User (Orang Tua)
+            $user = User::create([
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'role' => 'parent', // Pastikan role-nya Parent
+            ]);
 
-        Auth::login($user);
+            // 2. Jika ada data lokasi, langsung buatkan Data Siswa
+            if ($request->latitude && $request->student_name) {
+                Student::create([
+                    'user_id' => $user->id, // Link ke ortu yang barusan dibuat
+                    'name' => $request->student_name,
+                    'school_level' => $request->school_level ?? 'SD',
+                    'address_text' => 'Alamat dari Pin Map', // Nanti bisa diupdate
+                    'latitude' => $request->latitude,
+                    'longitude' => $request->longitude,
+                    'distance_to_school_meters' => ($request->distance * 1000), // Simpan dalam meter
+                    'price_per_month' => $request->price_estimasi,
+                    'status' => 'registered', // Status awal: Registered
+                    'payment_status' => 'unpaid', // Belum bayar
+                ]);
+            }
 
+            // Login otomatis setelah daftar
+            Auth::login($user);
+        });
+
+        // Redirect ke Dashboard (Nanti kita buat Dashboard Ortu)
         return redirect(route('dashboard', absolute: false));
     }
 }

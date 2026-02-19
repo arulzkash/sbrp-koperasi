@@ -65,24 +65,34 @@ const updateLocation = (lat, lng) => {
     }
 
     distanceKm.value = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
-    estimatedPrice.value = Math.round(BASE_PRICE + distanceKm.value * PRICE_PER_KM * 30);
+    estimatedPrice.value = Math.round(
+        BASE_PRICE + distanceKm.value * PRICE_PER_KM * 30,
+    );
 
     if (routeLine) map.removeLayer(routeLine);
-    routeLine = L.polyline([[lat, lng], [SCHOOL_LAT, SCHOOL_LNG]], {
-        color: "blue",
-        dashArray: "5, 10",
-        weight: 2,
-    }).addTo(map);
+    routeLine = L.polyline(
+        [
+            [lat, lng],
+            [SCHOOL_LAT, SCHOOL_LNG],
+        ],
+        {
+            color: "blue",
+            dashArray: "5, 10",
+            weight: 2,
+        },
+    ).addTo(map);
 };
 
 // Fungsi Pencarian Alamat ke Nominatim OSM (GRATIS)
 const searchAddress = async () => {
     if (!searchQuery.value) return;
-    
+
     isSearching.value = true;
     try {
         // Tembak API Nominatim (tambah Lembang biar pencarian fokus di area target)
-        const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery.value}, Lembang`);
+        const response = await fetch(
+            `https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery.value}, Lembang`,
+        );
         const data = await response.json();
 
         if (data && data.length > 0) {
@@ -91,9 +101,11 @@ const searchAddress = async () => {
 
             // Update lokasi & suruh peta terbang ke sana
             updateLocation(lat, lng);
-            map.flyTo([lat, lng], 16); 
+            map.flyTo([lat, lng], 16);
         } else {
-            alert("Alamat tidak ditemukan. Coba ketik nama jalan raya yang lebih umum, lalu geser pin-nya manual ke dalam gang.");
+            alert(
+                "Alamat tidak ditemukan. Coba ketik nama jalan raya yang lebih umum, lalu geser pin-nya manual ke dalam gang.",
+            );
         }
     } catch (error) {
         console.error("Error fetching address:", error);
@@ -113,7 +125,10 @@ onMounted(() => {
         fillColor: "red",
         fillOpacity: 1,
         radius: 8,
-    }).addTo(map).bindPopup("<b>Sekolah (Tujuan)</b>").openPopup();
+    })
+        .addTo(map)
+        .bindPopup("<b>Sekolah (Tujuan)</b>")
+        .openPopup();
 
     map.on("click", (e) => updateLocation(e.latlng.lat, e.latlng.lng));
 });
@@ -130,61 +145,96 @@ const formatRupiah = (angka) => {
 <template>
     <Head title="Cek Harga Antar-Jemput" />
 
-    <div class="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
-        <div class="max-w-5xl w-full bg-white rounded-xl shadow-lg overflow-hidden">
-            
+    <div
+        class="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4"
+    >
+        <div
+            class="max-w-5xl w-full bg-white rounded-xl shadow-lg overflow-hidden"
+        >
             <div class="bg-blue-600 p-6 text-white text-center">
-                <h1 class="text-3xl font-bold">Koperasi Bisa Berdikari Usaha</h1>
-                <p class="mt-2 opacity-90">Layanan Antar-Jemput Siswa Terintegrasi area Lembang</p>
+                <h1 class="text-3xl font-bold">
+                    Koperasi Bisa Berdikari Usaha
+                </h1>
+                <p class="mt-2 opacity-90">
+                    Layanan Antar-Jemput Siswa Terintegrasi area Lembang
+                </p>
             </div>
 
             <div class="p-6 md:flex gap-6">
                 <div class="md:w-2/3 flex flex-col">
-                    <h2 class="text-lg font-bold text-gray-800 mb-2">1. Tentukan Titik Jemput</h2>
-                    
+                    <h2 class="text-lg font-bold text-gray-800 mb-2">
+                        1. Tentukan Titik Jemput
+                    </h2>
+
                     <div class="flex gap-2 mb-4">
-                        <input 
+                        <input
                             v-model="searchQuery"
                             @keyup.enter="searchAddress"
-                            type="text" 
-                            placeholder="Contoh: Jl. Maribaya No 10..." 
+                            type="text"
+                            placeholder="Contoh: Jl. Maribaya No 10..."
                             class="w-full border-gray-300 rounded focus:border-blue-500 focus:ring-blue-500 shadow-sm"
-                        >
-                        <button 
+                        />
+                        <button
                             @click="searchAddress"
                             :disabled="isSearching"
                             class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors disabled:opacity-50"
                         >
-                            {{ isSearching ? 'Mencari...' : 'Cari' }}
+                            {{ isSearching ? "Mencari..." : "Cari" }}
                         </button>
                     </div>
 
                     <p class="text-sm text-gray-600 mb-2">
-                        Atau klik langsung pada peta. <b>Anda bisa menggeser (drag) pin biru</b> ke dalam gang untuk lokasi yang presisi.
+                        Atau klik langsung pada peta.
+                        <b>Anda bisa menggeser (drag) pin biru</b> ke dalam gang
+                        untuk lokasi yang presisi.
                     </p>
-                    
-                    <div id="landing-map" class="h-[400px] w-full rounded border-2 border-gray-300 z-0 flex-grow"></div>
+
+                    <div
+                        id="landing-map"
+                        class="h-[400px] w-full rounded border-2 border-gray-300 z-0 flex-grow"
+                    ></div>
                 </div>
 
                 <div class="md:w-1/3 mt-6 md:mt-0 flex flex-col justify-center">
-                    <div class="bg-gray-100 p-6 rounded-lg border border-gray-200 text-center">
-                        <h3 class="text-gray-500 font-semibold mb-2">Estimasi Tarif per Bulan</h3>
-                        
+                    <div
+                        class="bg-gray-100 p-6 rounded-lg border border-gray-200 text-center"
+                    >
+                        <h3 class="text-gray-500 font-semibold mb-2">
+                            Estimasi Tarif per Bulan
+                        </h3>
+
                         <div v-if="distanceKm > 0">
-                            <p class="text-4xl font-extrabold text-blue-600 my-4">
+                            <p
+                                class="text-4xl font-extrabold text-blue-600 my-4"
+                            >
                                 {{ formatRupiah(estimatedPrice) }}
                             </p>
                             <div class="text-sm text-gray-600 space-y-1">
-                                <p>Jarak ke sekolah: <b>{{ distanceKm.toFixed(2) }} KM</b></p>
-                                <p>Tarif Dasar: {{ formatRupiah(BASE_PRICE) }}</p>
-                                <p>Tarif Jarak: {{ formatRupiah(PRICE_PER_KM) }} / KM / Hari</p>
+                                <p>
+                                    Jarak ke sekolah:
+                                    <b>{{ distanceKm.toFixed(2) }} KM</b>
+                                </p>
+                                <p>
+                                    Tarif Dasar: {{ formatRupiah(BASE_PRICE) }}
+                                </p>
+                                <p>
+                                    Tarif Jarak:
+                                    {{ formatRupiah(PRICE_PER_KM) }} / KM / Hari
+                                </p>
                             </div>
-                            
-                            <hr class="my-4 border-gray-300">
-                            
-                            <Link 
+
+                            <hr class="my-4 border-gray-300" />
+
+                            <Link
                                 v-if="canRegister"
-                                :href="route('register')" 
+                                :href="
+                                    route('register', {
+                                        lat: userLat,
+                                        lng: userLng,
+                                        distance: distanceKm,
+                                        price: estimatedPrice,
+                                    })
+                                "
                                 class="block w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded transition duration-200"
                             >
                                 Mulai Berlangganan
@@ -192,14 +242,32 @@ const formatRupiah = (angka) => {
                         </div>
 
                         <div v-else class="py-8 text-gray-400">
-                            <svg class="w-12 h-12 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"></path></svg>
-                            <p>Cari alamat atau klik lokasi rumah Anda di peta.</p>
+                            <svg
+                                class="w-12 h-12 mx-auto mb-3"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                            >
+                                <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
+                                ></path>
+                            </svg>
+                            <p>
+                                Cari alamat atau klik lokasi rumah Anda di peta.
+                            </p>
                         </div>
                     </div>
 
                     <div class="mt-4 text-center">
                         <p class="text-sm text-gray-500">Sudah punya akun?</p>
-                        <Link v-if="canLogin" :href="route('login')" class="text-blue-600 font-semibold hover:underline">
+                        <Link
+                            v-if="canLogin"
+                            :href="route('login')"
+                            class="text-blue-600 font-semibold hover:underline"
+                        >
                             Login di sini
                         </Link>
                     </div>
