@@ -16,7 +16,8 @@ class RouteOptimizerService
         // 0. RESET DATA LAMA
         Student::whereNotNull('fleet_id')->update([
             'fleet_id' => null,
-            'route_order' => null
+            'route_order' => null,
+            'status' => 'registered'
         ]);
 
         // 1. AMBIL DATA
@@ -85,7 +86,8 @@ class RouteOptimizerService
                 // 4. SIMPAN URUTAN KE DATABASE
                 $closestStudent->update([
                     'fleet_id' => $fleet->id,
-                    'route_order' => $order
+                    'route_order' => $order,
+                    'status' => 'active'
                 ]);
 
                 // Supir pindah posisi ke rumah anak yang baru dijemput
