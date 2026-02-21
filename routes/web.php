@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\RouteController;
+use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -53,7 +54,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/edit-location/{id}', function ($id) {
         // Cari data anak yang mau diedit, pastikan milik user yang login
         $student = Student::where('user_id', Auth::id())->findOrFail($id);
-        
+
         // Proteksi: Kalau statusnya sudah active, tolak aksesnya
         if ($student->status === 'active') {
             return redirect('/dashboard')->with('error', 'Rute sudah terkunci.');
@@ -67,7 +68,7 @@ Route::middleware('auth')->group(function () {
     // 2. Route untuk MENYIMPAN perubahan dari Peta
     Route::put('/update-location/{id}', function (Request $request, $id) {
         $student = Student::where('user_id', Auth::id())->findOrFail($id);
-        
+
         if ($student->status === 'active') {
             return back()->with('error', 'Rute sudah terkunci.');
         }
@@ -90,6 +91,12 @@ Route::middleware('auth')->group(function () {
 
         return redirect('/dashboard')->with('success', 'Lokasi jemputan berhasil diupdate.');
     })->name('location.update');
+
+    Route::prefix('finance')->group(function () {
+        Route::get('/students', [FinanceController::class, 'index'])->name('finance.students');
+
+        Route::put('/students/{id}/pay', [FinanceController::class, 'markAsPaid'])->name('finance.students.pay');
+    });
 });
 
 Route::get('/admin/dashboard', [RouteController::class, 'dashboard'])->name('admin.dashboard');
