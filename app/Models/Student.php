@@ -11,6 +11,9 @@ class Student extends Model
         'fleet_id',
         'name',
         'school_level',
+        'service_type',
+        'session_in',
+        'session_out',
         'address_text',
         'latitude',
         'longitude',
@@ -19,14 +22,29 @@ class Student extends Model
         'status',
         'payment_status',
         'route_order',
+        'morning_fleet_id',
+        'morning_route_order',
+        'afternoon_fleet_id',
+        'afternoon_route_order',
     ];
 
     public function fleet()
     {
         return $this->belongsTo(Fleet::class);
     }
+
     public function user()
     {
         return $this->belongsTo(User::class);
+    }
+    
+    public function morningFleet()
+    {
+        return $this->belongsTo(Fleet::class, 'morning_fleet_id');
+    }
+
+    public function afternoonFleet()
+    {
+        return $this->belongsTo(Fleet::class, 'afternoon_fleet_id');
     }
 }
