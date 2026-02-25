@@ -41,6 +41,10 @@ class RegisteredUserController extends Controller
             'student_name' => 'nullable|string|max:255',
             'latitude' => 'nullable',
             'longitude' => 'nullable',
+
+            'service_type' => 'nullable|in:full,pickup_only,dropoff_only',
+            'session_in' => 'nullable|date_format:H:i',
+            'session_out' => 'nullable|date_format:H:i',
         ]);
 
         // Pakai Database Transaction biar aman (Kalau gagal satu, gagal semua)
@@ -60,6 +64,9 @@ class RegisteredUserController extends Controller
                     'user_id' => $user->id, // Link ke ortu yang barusan dibuat
                     'name' => $request->student_name,
                     'school_level' => $request->school_level ?? 'SD',
+                    'service_type' => $request->service_type ?? 'full',
+                    'session_in' => $request->session_in,
+                    'session_out' => $request->session_out,
                     'address_text' => 'Alamat dari Pin Map', // Nanti bisa diupdate
                     'latitude' => $request->latitude,
                     'longitude' => $request->longitude,
