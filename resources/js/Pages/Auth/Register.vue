@@ -20,6 +20,7 @@ const form = useForm({
     
     student_name: '',
     school_level: 'SD',
+    class_room: '',
     
     // DATA BARU: Sesi & Layanan
     service_type: 'full', // Default: Antar-Jemput
@@ -85,18 +86,22 @@ const formatRupiah = (angka) => {
             <div class="mb-6" v-if="form.latitude">
                 <h2 class="text-lg font-semibold text-gray-700 mb-3">Data Siswa & Jadwal</h2>
                 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <InputLabel for="student_name" value="Nama Siswa" />
                         <TextInput id="student_name" type="text" class="mt-1 block w-full" v-model="form.student_name" required placeholder="Nama lengkap anak" />
                     </div>
                     <div>
-                        <InputLabel for="school_level" value="Jenjang Pendidikan" />
+                        <InputLabel for="school_level" value="Jenjang" />
                         <select id="school_level" v-model="form.school_level" class="mt-1 block w-full border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 rounded-md shadow-sm">
                             <option value="TK">TK</option>
                             <option value="SD">SD</option>
                             <option value="SMP">SMP</option>
                         </select>
+                    </div>
+                    <div>
+                        <InputLabel for="class_room" value="Kelas (Detail)" />
+                        <TextInput id="class_room" type="text" class="mt-1 block w-full" v-model="form.class_room" required placeholder="Contoh: 4B, 7A, B1" />
                     </div>
                 </div>
 

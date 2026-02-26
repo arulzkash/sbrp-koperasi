@@ -41,6 +41,8 @@ class RegisteredUserController extends Controller
             'student_name' => 'nullable|string|max:255',
             'latitude' => 'nullable',
             'longitude' => 'nullable',
+            'school_level' => 'required|string',
+            'class_room' => 'required|string|max:50',
 
             'service_type' => 'nullable|in:full,pickup_only,dropoff_only',
             'session_in' => 'nullable|date_format:H:i',
@@ -64,6 +66,7 @@ class RegisteredUserController extends Controller
                     'user_id' => $user->id, // Link ke ortu yang barusan dibuat
                     'name' => $request->student_name,
                     'school_level' => $request->school_level ?? 'SD',
+                    'class_room' => $request->class_room,
                     'service_type' => $request->service_type ?? 'full',
                     'session_in' => $request->session_in,
                     'session_out' => $request->session_out,

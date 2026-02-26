@@ -11,6 +11,7 @@ class Student extends Model
         'fleet_id',
         'name',
         'school_level',
+        'class_room',
         'service_type',
         'session_in',
         'session_out',
