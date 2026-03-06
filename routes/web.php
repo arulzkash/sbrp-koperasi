@@ -36,7 +36,7 @@ Route::get('/dashboard', function () {
     }
 
     // Kalau yang login ORANG TUA, ambil data anak-anaknya beserta info armada (jika ada)
-    $children = Student::with('fleet')
+    $children = Student::with(['morningFleet', 'afternoonFleet'])
         ->where('user_id', $user->id)
         ->get();
 
