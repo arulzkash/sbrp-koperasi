@@ -7,17 +7,11 @@ use App\Models\Student;
 
 class RouteOptimizerService
 {
-    // Titik Pusat (Sekolah)
     const SCHOOL_LAT = -6.815348;
     const SCHOOL_LNG = 107.616659;
 
-    /**
-     * Fungsi Utama yang dipanggil oleh tombol "Generate Route" di Admin
-     */
     public function optimize()
     {
-        // 1. RESET SEMUA RUTE LAMA
-        // Kita kosongkan dulu mobil pagi & sore sebelum dihitung ulang
         Student::query()->update([
             'morning_fleet_id' => null,
             'morning_route_order' => null,
@@ -25,62 +19,59 @@ class RouteOptimizerService
             'afternoon_route_order' => null,
         ]);
 
-        // Kembalikan status anak yang Lunas menjadi 'registered' dulu untuk dievaluasi ulang
-        Student::where('payment_status', 'paid')->update(['status' => 'registered']);
+        Student::where('payment_status', 'paid')
+            ->update(['status' => 'registered']);
 
-        // 2. JALANKAN ALGORITMA PAGI (BERANGKAT)
         $this->optimizeMorningRoutes();
-
-        // 3. JALANKAN ALGORITMA SIANG/SORE (PULANG) DENGAN TIME WINDOWS
         $this->optimizeAfternoonRoutes();
 
-        // 4. UPDATE STATUS
-        // Jika anak masuk ke minimal salah satu armada (pagi/sore), ubah status jadi Aktif
         Student::whereNotNull('morning_fleet_id')
             ->orWhereNotNull('afternoon_fleet_id')
             ->update(['status' => 'active']);
     }
 
     /**
-     * ALGORITMA PAGI: Semua anak berangkat serentak
+     * MORNING ROUTE
      */
     private function optimizeMorningRoutes()
     {
         $fleets = Fleet::where('is_active', true)->get();
-        // Ambil anak yang Lunas & minta dijemput pagi (full atau pickup_only)
+
         $students = Student::where('payment_status', 'paid')
             ->whereIn('service_type', ['full', 'pickup_only'])
             ->get();
 
         if ($fleets->isEmpty() || $students->isEmpty()) return;
 
-        // Bikin tracking kapasitas mobil untuk Pagi
         $fleetCapacities = [];
         foreach ($fleets as $fleet) {
             $fleetCapacities[$fleet->id] = $fleet->capacity;
         }
 
-        // Loop setiap anak, cari mobil terdekat dari rumahnya
         foreach ($students as $student) {
+
             $bestFleetId = null;
             $minDistance = PHP_INT_MAX;
 
             foreach ($fleets as $fleet) {
-                // Cek apakah mobil ini masih ada kursi kosong
-                if ($fleetCapacities[$fleet->id] > 0) {
-                    // Hitung jarak dari rumah anak ke Pool Mobil (Base)
-                    $distance = $this->calculateDistance($student->latitude, $student->longitude, $fleet->base_latitude, $fleet->base_longitude);
-                    
-                    if ($distance < $minDistance) {
-                        $minDistance = $distance;
-                        $bestFleetId = $fleet->id;
-                    }
+
+                if ($fleetCapacities[$fleet->id] <= 0) continue;
+
+                $distance = $this->calculateDistance(
+                    $student->latitude,
+                    $student->longitude,
+                    $fleet->base_latitude,
+                    $fleet->base_longitude
+                );
+
+                if ($distance < $minDistance) {
+                    $minDistance = $distance;
+                    $bestFleetId = $fleet->id;
                 }
             }
 
-            // Jika ketemu mobil yang cocok dan masih muat
             if ($bestFleetId) {
-                // Urutan jemput: Hitung ada berapa anak di mobil ini untuk pagi hari
+
                 $order = Student::where('morning_fleet_id', $bestFleetId)->count() + 1;
 
                 $student->update([
@@ -88,87 +79,195 @@ class RouteOptimizerService
                     'morning_route_order' => $order
                 ]);
 
-                // Kurangi sisa kursi mobil tersebut
                 $fleetCapacities[$bestFleetId]--;
             }
         }
     }
 
     /**
-     * ALGORITMA SORE: Berbasis Time Windows (Jam Pulang)
+     * AFTERNOON ROUTE (Improved VRP-like)
      */
     private function optimizeAfternoonRoutes()
     {
         $fleets = Fleet::where('is_active', true)->get();
-        
-        // Ambil anak yang Lunas & minta diantar pulang (full atau dropoff_only)
+
         $studentsAll = Student::where('payment_status', 'paid')
             ->whereIn('service_type', ['full', 'dropoff_only'])
             ->get();
 
         if ($fleets->isEmpty() || $studentsAll->isEmpty()) return;
 
-        // KELOMPOKKAN BERDASARKAN JAM PULANG (Time Windows)
-        // Misal: Group 13:00, Group 14:30, dst.
         $groupedBySession = $studentsAll->groupBy('session_out');
 
-        foreach ($groupedBySession as $timeSession => $studentsInSession) {
-            
-            // MAGIC TRICK: Setiap ganti jam sesi, KAPASITAS MOBIL DI-RESET!
-            // Karena mobil yang dipakai jam 13:00 bisa kembali dipakai jam 15:30.
-            $fleetCapacities = [];
-            foreach ($fleets as $fleet) {
-                $fleetCapacities[$fleet->id] = $fleet->capacity;
-            }
+        foreach ($groupedBySession as $session => $students) {
 
-            foreach ($studentsInSession as $student) {
-                $bestFleetId = null;
-                $minDistance = PHP_INT_MAX;
+            $clusters = $this->clusterByDirection($students->values()->all(), $fleets->count());
 
-                foreach ($fleets as $fleet) {
-                    if ($fleetCapacities[$fleet->id] > 0) {
-                        // Karena ini pulangan, kita hitung jarak kedekatan antar rumah anak ke sekolah, 
-                        // agar anak yang searah masuk mobil yang sama.
-                        $distance = $this->calculateDistance($student->latitude, $student->longitude, self::SCHOOL_LAT, self::SCHOOL_LNG);
-                        
-                        if ($distance < $minDistance) {
-                            $minDistance = $distance;
-                            $bestFleetId = $fleet->id;
-                        }
-                    }
+            foreach ($clusters as $clusterIndex => $clusterStudents) {
+
+                if (empty($clusterStudents)) continue;
+
+                $fleet = $fleets[$clusterIndex % $fleets->count()];
+
+                if (count($clusterStudents) > $fleet->capacity) {
+                    $clusterStudents = array_slice($clusterStudents, 0, $fleet->capacity);
                 }
 
-                if ($bestFleetId) {
-                    // Hitung urutan di dalam armada untuk sesi ini
-                    $order = Student::where('afternoon_fleet_id', $bestFleetId)
-                                    ->where('session_out', $timeSession)
-                                    ->count() + 1;
+                $route = $this->nearestNeighborRoute($clusterStudents);
+
+                $route = $this->twoOptImprove($route);
+
+                foreach ($route as $order => $student) {
 
                     $student->update([
-                        'afternoon_fleet_id' => $bestFleetId,
-                        'afternoon_route_order' => $order
+                        'afternoon_fleet_id' => $fleet->id,
+                        'afternoon_route_order' => $order + 1
                     ]);
-
-                    $fleetCapacities[$bestFleetId]--;
                 }
             }
         }
     }
 
     /**
-     * Rumus Haversine (Jarak GPS)
+     * Directional clustering based on angle from school
+     */
+    private function clusterByDirection($students, $clusterCount)
+    {
+        $clusters = array_fill(0, $clusterCount, []);
+
+        foreach ($students as $student) {
+
+            $angle = atan2(
+                $student->latitude - self::SCHOOL_LAT,
+                $student->longitude - self::SCHOOL_LNG
+            );
+
+            $index = intval(($angle + M_PI) / (2 * M_PI) * $clusterCount);
+
+            if ($index >= $clusterCount) $index = $clusterCount - 1;
+
+            $clusters[$index][] = $student;
+        }
+
+        return $clusters;
+    }
+
+    /**
+     * Nearest Neighbor route construction
+     */
+    private function nearestNeighborRoute($students)
+    {
+        $route = [];
+
+        $currentLat = self::SCHOOL_LAT;
+        $currentLng = self::SCHOOL_LNG;
+
+        while (count($students) > 0) {
+
+            $nearest = null;
+            $nearestKey = null;
+            $minDistance = PHP_INT_MAX;
+
+            foreach ($students as $key => $student) {
+
+                $distance = $this->calculateDistance(
+                    $currentLat,
+                    $currentLng,
+                    $student->latitude,
+                    $student->longitude
+                );
+
+                if ($distance < $minDistance) {
+                    $minDistance = $distance;
+                    $nearest = $student;
+                    $nearestKey = $key;
+                }
+            }
+
+            $route[] = $nearest;
+
+            $currentLat = $nearest->latitude;
+            $currentLng = $nearest->longitude;
+
+            unset($students[$nearestKey]);
+        }
+
+        return $route;
+    }
+
+    /**
+     * 2-opt improvement
+     */
+    private function twoOptImprove($route)
+    {
+        $improved = true;
+
+        while ($improved) {
+
+            $improved = false;
+
+            for ($i = 1; $i < count($route) - 2; $i++) {
+
+                for ($j = $i + 1; $j < count($route); $j++) {
+
+                    $newRoute = $route;
+
+                    $segment = array_slice($newRoute, $i, $j - $i);
+                    $segment = array_reverse($segment);
+
+                    array_splice($newRoute, $i, $j - $i, $segment);
+
+                    if ($this->routeDistance($newRoute) < $this->routeDistance($route)) {
+
+                        $route = $newRoute;
+                        $improved = true;
+                    }
+                }
+            }
+        }
+
+        return $route;
+    }
+
+    private function routeDistance($route)
+    {
+        $distance = 0;
+
+        $prevLat = self::SCHOOL_LAT;
+        $prevLng = self::SCHOOL_LNG;
+
+        foreach ($route as $student) {
+
+            $distance += $this->calculateDistance(
+                $prevLat,
+                $prevLng,
+                $student->latitude,
+                $student->longitude
+            );
+
+            $prevLat = $student->latitude;
+            $prevLng = $student->longitude;
+        }
+
+        return $distance;
+    }
+
+    /**
+     * Haversine formula
      */
     private function calculateDistance($lat1, $lon1, $lat2, $lon2)
     {
-        $earthRadius = 6371; // KM
+        $earthRadius = 6371;
+
         $dLat = deg2rad($lat2 - $lat1);
         $dLon = deg2rad($lon2 - $lon1);
 
         $a = sin($dLat / 2) * sin($dLat / 2) +
-             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-             sin($dLon / 2) * sin($dLon / 2);
+            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
+            sin($dLon / 2) * sin($dLon / 2);
 
         $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
         return $earthRadius * $c;
     }
 }
