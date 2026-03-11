@@ -22,6 +22,9 @@ let markersLayer = null; // Layer khusus untuk menampung marker agar mudah dihap
 let vehicleAnimations = [];
 let renderVersion = 0;
 
+const activeFleetId = ref(null);
+const animationEnabled = ref(false);
+
 const routeCache = new Map();
 
 const SCHOOL_COORD = [-6.826864390637824, 107.63886429303408];
@@ -196,7 +199,13 @@ const renderMap = () => {
         // ======================
 
         if (routeCoords.length > 1) {
-            drawRouteWithOSRM(routeCoords, fleetColor, index, currentRender);
+            drawRouteWithOSRM(
+                routeCoords,
+                fleetColor,
+                index,
+                currentRender,
+                fleet.id,
+            );
         }
     });
 
@@ -237,26 +246,38 @@ const generateRoute = () => {
     );
 };
 
-const drawRouteWithOSRM = async (coords, color, fleetindex = 0, renderId) => {
+const drawRouteWithOSRM = async (
+    coords,
+    color,
+    fleetindex = 0,
+    renderId,
+    fleetId,
+) => {
     if (coords.length < 2) return;
 
     const coordString = coords.map((c) => `${c[1]},${c[0]}`).join(";");
+    const hasActive = activeFleetId.value !== null;
+    const isActive = activeFleetId.value === fleetId;
+
+    const drawPolyline = (routePoints) => {
+        L.polyline(routePoints, {
+            color: color,
+            weight: hasActive && isActive ? 6 : 3,
+            opacity: hasActive ? (isActive ? 1 : 0.25) : 0.9,
+            dashArray: hasActive ? (isActive ? null : "6,6") : null,
+        }).addTo(markersLayer);
+
+        if (animationEnabled.value && isActive) {
+            animateVehicle(routePoints);
+        }
+    };
 
     // CACHE
     if (routeCache.has(coordString)) {
         if (renderId !== renderVersion) return;
 
         const cachedRoute = routeCache.get(coordString);
-
-        L.polyline(cachedRoute, {
-            color: color,
-            weight: 5,
-            opacity: 0.7,
-            dashArray: fleetindex % 2 ? "8,6" : null,
-        }).addTo(markersLayer);
-
-        animateVehicle(cachedRoute);
-
+        drawPolyline(cachedRoute);
         return;
     }
 
@@ -275,15 +296,7 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0, renderId) => {
         ]);
 
         routeCache.set(coordString, route);
-
-        L.polyline(route, {
-            color: color,
-            weight: 5,
-            opacity: 0.7,
-            dashArray: fleetindex % 2 ? "8,6" : null,
-        }).addTo(markersLayer);
-
-        animateVehicle(route);
+        drawPolyline(route);
     } catch (err) {
         if (renderId !== renderVersion) return;
 
@@ -291,7 +304,8 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0, renderId) => {
 
         L.polyline(coords, {
             color: color,
-            weight: 3,
+            weight: isActive ? 6 : 3,
+            opacity: isActive ? 1 : 0.35,
             dashArray: "5,10",
         }).addTo(markersLayer);
     }
@@ -342,10 +356,41 @@ const animateVehicle = (route) => {
     vehicleAnimations.push(interval);
 };
 
+const focusFleet = (fleetId) => {
+    vehicleAnimations.forEach((i) => clearInterval(i));
+    vehicleAnimations = [];
+    animationEnabled.value = false;
+
+    activeFleetId.value = activeFleetId.value === fleetId ? null : fleetId;
+
+    renderMap();
+};
+
+const startAnimation = () => {
+    if (!activeFleetId.value) return;
+
+    vehicleAnimations.forEach((i) => clearInterval(i));
+    vehicleAnimations = [];
+
+    animationEnabled.value = true;
+
+    renderMap();
+};
+
 // Pantau perubahan pada props data atau filter dropdown
 watch(
     [() => props.students, viewMode, selectedSession],
-    () => {
+    (
+        [studentsNow, modeNow, sessionNow],
+        [studentsOld, modeOld, sessionOld],
+    ) => {
+        if (modeNow !== modeOld || sessionNow !== sessionOld) {
+            activeFleetId.value = null;
+            animationEnabled.value = false;
+            vehicleAnimations.forEach((i) => clearInterval(i));
+            vehicleAnimations = [];
+        }
+
         renderMap();
     },
     { deep: true },
@@ -365,6 +410,7 @@ onMounted(() => {
         <div
             class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded flex flex-col md:flex-row items-center justify-between gap-4"
         >
+            <!-- LEFT SIDE -->
             <div class="flex flex-wrap items-center gap-4">
                 <div class="flex flex-col">
                     <label
@@ -402,14 +448,25 @@ onMounted(() => {
                 </div>
             </div>
 
-            <button
-                @click="generateRoute"
-                :disabled="isGenerating"
-                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
-            >
-                <span v-if="!isGenerating">🚀 Generate Rute Baru</span>
-                <span v-else>Menghitung Algoritma...</span>
-            </button>
+            <!-- RIGHT SIDE BUTTON GROUP -->
+            <div class="flex items-center gap-3">
+                <button
+                    v-if="activeFleetId"
+                    @click="startAnimation"
+                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
+                >
+                    ▶ Simulasi Armada
+                </button>
+
+                <button
+                    @click="generateRoute"
+                    :disabled="isGenerating"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
+                >
+                    <span v-if="!isGenerating">🚀 Generate Rute Baru</span>
+                    <span v-else>Menghitung Algoritma...</span>
+                </button>
+            </div>
         </div>
 
         <div class="flex gap-6">
@@ -421,19 +478,25 @@ onMounted(() => {
             </div>
 
             <div
-                class="w-1/3 bg-white p-4 rounded shadow border border-gray-200 max-h-[600px] overflow-y-auto"
+                class="w-1/3 bg-white p-4 rounded shadow border border-gray-200 max-h-[600px] overflow-y-auto pr-1"
             >
-                <h2 class="font-bold text-lg mb-2">Penugasan Armada</h2>
-                <p class="text-sm text-gray-500 mb-4 pb-2 border-b">
-                    <span v-if="viewMode === 'morning'"
-                        >Menampilkan rute jemputan pagi (serentak).</span
-                    >
-                    <span v-else
-                        >Menampilkan rute pulang untuk Sesi
-                        {{ selectedSession.substring(0, 5) }}.</span
-                    >
+                <!-- HEADER -->
+                <h2 class="font-semibold text-gray-800 text-lg mb-1">
+                    Penugasan Armada
+                </h2>
+
+                <p class="text-xs text-gray-400 mb-4 pb-3 border-b">
+                    <span v-if="viewMode === 'morning'">
+                        Menampilkan rute jemputan pagi (serentak).
+                    </span>
+
+                    <span v-else>
+                        Menampilkan rute pulang untuk sesi
+                        {{ selectedSession.substring(0, 5) }}.
+                    </span>
                 </p>
 
+                <!-- EMPTY STATE -->
                 <div
                     v-if="sidebarData.length === 0"
                     class="text-center text-gray-400 py-8 italic"
@@ -441,41 +504,79 @@ onMounted(() => {
                     Belum ada armada yang ditugaskan untuk sesi ini.
                 </div>
 
+                <!-- FLEET CARD -->
                 <div
                     v-for="(fleet, index) in sidebarData"
-                    :key="index"
-                    class="mb-6"
+                    :key="fleet.id"
+                    @click="focusFleet(fleet.id)"
+                    class="mb-4 cursor-pointer rounded-lg border p-3 transition-all duration-200"
+                    :class="{
+                        'bg-yellow-50 border-yellow-300 shadow-sm':
+                            activeFleetId === fleet.id,
+
+                        'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm':
+                            activeFleetId !== fleet.id,
+                    }"
                 >
-                    <div class="flex items-center gap-2 mb-2">
-                        <span
-                            class="w-4 h-4 rounded-full"
-                            :style="{
-                                backgroundColor: colors[index % colors.length],
-                            }"
-                        ></span>
-                        <h3 class="font-bold text-gray-800">
-                            🚗 {{ fleet.name }}
-                        </h3>
+                    <!-- HEADER -->
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span
+                                class="w-3 h-3 rounded-full"
+                                :style="{
+                                    backgroundColor:
+                                        colors[index % colors.length],
+                                }"
+                            ></span>
+
+                            <h3 class="font-semibold text-gray-800">
+                                🚗 {{ fleet.name }}
+                            </h3>
+                        </div>
+
+                        <span class="text-xs text-gray-400 font-medium">
+                            {{ fleet.assigned_students.length }}/{{
+                                fleet.capacity
+                            }}
+                        </span>
                     </div>
 
-                    <p class="text-xs text-gray-500 mb-2 ml-6">
-                        Kapasitas Terpakai:
-                        <b class="text-gray-700">{{
-                            fleet.assigned_students.length
-                        }}</b>
-                        / {{ fleet.capacity }} Kursi
-                    </p>
+                    <!-- CAPACITY BAR -->
+                    <div class="ml-5 mb-3">
+                        <div class="text-xs text-gray-500 mb-1">
+                            Kapasitas Terpakai
+                        </div>
 
+                        <div
+                            class="w-full bg-gray-100 rounded h-2 overflow-hidden"
+                        >
+                            <div
+                                class="h-2 rounded transition-all"
+                                :style="{
+                                    width:
+                                        (fleet.assigned_students.length /
+                                            fleet.capacity) *
+                                            100 +
+                                        '%',
+                                    backgroundColor:
+                                        colors[index % colors.length],
+                                }"
+                            ></div>
+                        </div>
+                    </div>
+
+                    <!-- STUDENT LIST -->
                     <ul
-                        class="list-none pl-6 text-sm space-y-2 relative border-l-2 border-gray-100 ml-2"
+                        class="list-none pl-6 text-sm space-y-1 relative border-l-2 border-gray-100 ml-2"
                     >
                         <li
                             v-for="student in fleet.assigned_students"
                             :key="student.id"
-                            class="relative pl-4"
+                            class="relative pl-4 py-1 rounded"
                         >
+                            <!-- NUMBER -->
                             <span
-                                class="absolute -left-[9px] top-1 bg-white border-2 rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold"
+                                class="absolute -left-[10px] top-1 bg-white border-2 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold shadow-sm"
                                 :style="{
                                     borderColor: colors[index % colors.length],
                                     color: colors[index % colors.length],
@@ -488,9 +589,12 @@ onMounted(() => {
                                 }}
                             </span>
 
-                            <p class="font-semibold text-gray-700">
+                            <!-- NAME -->
+                            <p class="font-medium text-gray-700">
                                 {{ student.name }}
                             </p>
+
+                            <!-- META -->
                             <p class="text-xs text-gray-500">
                                 Kls: {{ student.class_room || "-" }} | Sesi:
                                 {{ student.session_out.substring(0, 5) }}
