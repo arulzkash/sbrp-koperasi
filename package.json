@@ -18,6 +18,7 @@
         "vue": "^3.4.0"
     },
     "dependencies": {
-        "leaflet": "^1.9.4"
+        "leaflet": "^1.9.4",
+        "leaflet-rotatedmarker": "^0.2.0"
     }
 }

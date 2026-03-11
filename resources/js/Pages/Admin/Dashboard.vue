@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from "vue";
 import { router } from "@inertiajs/vue3";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import "leaflet-rotatedmarker";
 
 // Terima data dari Laravel Controller
 const props = defineProps({
@@ -18,6 +19,8 @@ const selectedSession = ref("13:00:00"); // Sesuai format database time (H:i:s)
 
 let map = null;
 let markersLayer = null; // Layer khusus untuk menampung marker agar mudah dihapus
+let vehicleAnimations = [];
+let renderVersion = 0;
 
 const routeCache = new Map();
 
@@ -32,6 +35,12 @@ const colors = [
     "#f97316",
     "#991b1b",
 ];
+
+const vehicleIcon = L.icon({
+    iconUrl: "https://cdn-icons-png.flaticon.com/512/744/744465.png",
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+});
 
 // 1. FILTER DATA SISWA (Real-time berdasarkan dropdown)
 const filteredStudents = computed(() => {
@@ -71,8 +80,13 @@ const sidebarData = computed(() => {
 
 // 3. FUNGSI RENDER PETA
 const renderMap = () => {
-
     if (!map) return;
+
+    renderVersion++;
+    const currentRender = renderVersion;
+
+    vehicleAnimations.forEach((i) => clearInterval(i));
+    vehicleAnimations = [];
 
     markersLayer.clearLayers();
 
@@ -90,7 +104,6 @@ const renderMap = () => {
     bounds.push(SCHOOL_COORD);
 
     sidebarData.value.forEach((fleet, index) => {
-
         const fleetColor = colors[index % colors.length];
 
         const routeCoords = [];
@@ -100,9 +113,7 @@ const renderMap = () => {
         // ======================
 
         if (viewMode.value === "morning") {
-
             if (fleet.base_latitude && fleet.base_longitude) {
-
                 const base = [fleet.base_latitude, fleet.base_longitude];
 
                 routeCoords.push(base);
@@ -122,24 +133,21 @@ const renderMap = () => {
                     .addTo(markersLayer)
                     .bindPopup(`<b>POOL ${fleet.name}</b>`);
             }
-
         } else {
-
             routeCoords.push(SCHOOL_COORD);
         }
-
 
         // ======================
         // SISWA
         // ======================
 
         fleet.assigned_students.forEach((student) => {
-
             const coord = [student.latitude, student.longitude];
 
-            const order = viewMode.value === "morning"
-                ? student.morning_route_order
-                : student.afternoon_route_order;
+            const order =
+                viewMode.value === "morning"
+                    ? student.morning_route_order
+                    : student.afternoon_route_order;
 
             routeCoords.push(coord);
             bounds.push(coord);
@@ -173,45 +181,34 @@ const renderMap = () => {
                 Armada: ${fleet.name}<br>
                 Urutan: ${order}
             `);
-
         });
-
 
         // ======================
         // TITIK AKHIR
         // ======================
 
         if (viewMode.value === "morning") {
-
             routeCoords.push(SCHOOL_COORD);
         }
-
 
         // ======================
         // ROUTE OSRM
         // ======================
 
         if (routeCoords.length > 1) {
-
-            drawRouteWithOSRM(routeCoords, fleetColor, index);
-
+            drawRouteWithOSRM(routeCoords, fleetColor, index, currentRender);
         }
-
     });
-
 
     // ======================
     // AUTO ZOOM
     // ======================
 
     if (bounds.length > 0) {
-
         map.fitBounds(bounds, {
             padding: [40, 40],
         });
-
     }
-
 };
 
 const initMap = () => {
@@ -240,15 +237,14 @@ const generateRoute = () => {
     );
 };
 
-const drawRouteWithOSRM = async (coords, color, fleetindex = 0) => {
+const drawRouteWithOSRM = async (coords, color, fleetindex = 0, renderId) => {
     if (coords.length < 2) return;
 
     const coordString = coords.map((c) => `${c[1]},${c[0]}`).join(";");
 
-    // =========================
-    // CHECK CACHE
-    // =========================
+    // CACHE
     if (routeCache.has(coordString)) {
+        if (renderId !== renderVersion) return;
 
         const cachedRoute = routeCache.get(coordString);
 
@@ -259,6 +255,8 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0) => {
             dashArray: fleetindex % 2 ? "8,6" : null,
         }).addTo(markersLayer);
 
+        animateVehicle(cachedRoute);
+
         return;
     }
 
@@ -268,14 +266,14 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0) => {
         const res = await fetch(url);
         const data = await res.json();
 
+        if (renderId !== renderVersion) return;
+        if (!data.routes || !data.routes.length) return;
+
         const route = data.routes[0].geometry.coordinates.map((c) => [
             c[1],
             c[0],
         ]);
 
-        // =========================
-        // SAVE TO CACHE
-        // =========================
         routeCache.set(coordString, route);
 
         L.polyline(route, {
@@ -284,16 +282,64 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0) => {
             opacity: 0.7,
             dashArray: fleetindex % 2 ? "8,6" : null,
         }).addTo(markersLayer);
+
+        animateVehicle(route);
     } catch (err) {
+        if (renderId !== renderVersion) return;
+
         console.error("OSRM error", err);
 
-        // fallback ke garis lurus kalau gagal
         L.polyline(coords, {
             color: color,
             weight: 3,
             dashArray: "5,10",
         }).addTo(markersLayer);
     }
+};
+
+const animateVehicle = (route) => {
+    if (!route || route.length < 2) return;
+
+    const marker = L.marker(route[0], {
+        icon: vehicleIcon,
+        rotationAngle: 0,
+    }).addTo(markersLayer);
+
+    let i = 0;
+    const myRenderVersion = renderVersion;
+
+    const interval = setInterval(() => {
+        if (myRenderVersion !== renderVersion) {
+            clearInterval(interval);
+            return;
+        }
+
+        if (!map || !markersLayer.hasLayer(marker)) {
+            clearInterval(interval);
+            return;
+        }
+
+        if (i >= route.length - 1) {
+            clearInterval(interval);
+            return;
+        }
+
+        const current = route[i];
+        const next = route[i + 1];
+
+        const dx = next[1] - current[1];
+        const dy = next[0] - current[0];
+
+        let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+        angle = angle + 90;
+
+        marker.setRotationAngle(angle);
+        marker.setLatLng(next);
+
+        i++;
+    }, 80);
+
+    vehicleAnimations.push(interval);
 };
 
 // Pantau perubahan pada props data atau filter dropdown
