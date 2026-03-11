@@ -19,6 +19,8 @@ const selectedSession = ref("13:00:00"); // Sesuai format database time (H:i:s)
 let map = null;
 let markersLayer = null; // Layer khusus untuk menampung marker agar mudah dihapus
 
+const routeCache = new Map();
+
 const SCHOOL_COORD = [-6.826864390637824, 107.63886429303408];
 
 // Daftar warna armada
@@ -243,6 +245,23 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0) => {
 
     const coordString = coords.map((c) => `${c[1]},${c[0]}`).join(";");
 
+    // =========================
+    // CHECK CACHE
+    // =========================
+    if (routeCache.has(coordString)) {
+
+        const cachedRoute = routeCache.get(coordString);
+
+        L.polyline(cachedRoute, {
+            color: color,
+            weight: 5,
+            opacity: 0.7,
+            dashArray: fleetindex % 2 ? "8,6" : null,
+        }).addTo(markersLayer);
+
+        return;
+    }
+
     const url = `https://router.project-osrm.org/route/v1/driving/${coordString}?overview=full&geometries=geojson`;
 
     try {
@@ -253,6 +272,11 @@ const drawRouteWithOSRM = async (coords, color, fleetindex = 0) => {
             c[1],
             c[0],
         ]);
+
+        // =========================
+        // SAVE TO CACHE
+        // =========================
+        routeCache.set(coordString, route);
 
         L.polyline(route, {
             color: color,
