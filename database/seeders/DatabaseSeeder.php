@@ -2,165 +2,201 @@
 
 namespace Database\Seeders;
 
+use Illuminate\Database\Seeder;
 use App\Models\User;
 use App\Models\Student;
 use App\Models\Fleet;
-use App\Models\DistanceMatrix;
-use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
-    /**
-     * Koordinat Pusat Lembang (Alun-alun / Masjid Besar)
-     * Kita anggap Sekolah ada di sekitar sini.
-     */
-    const SCHOOL_LAT = -6.815348;
-    const SCHOOL_LNG = 107.616659;
+    const SCHOOL_LAT = -6.826864390637824;
+    const SCHOOL_LNG = 107.63886429303408;
 
     public function run(): void
     {
-        // 1. Akun Pengelola Koperasi (Si Pengatur Rute)
-        User::factory()->create([
-            'name' => 'Pak Asep (Pengelola Ops)',
-            'email' => 'admin.ops@koperasi.com',
+
+        /*
+        |--------------------------------------------------------------------------
+        | USERS
+        |--------------------------------------------------------------------------
+        */
+
+        User::create([
+            'name' => 'Pak Asep (Manager)',
+            'email' => 'manager@koperasi.com',
             'password' => Hash::make('password'),
-            'role' => 'manager',
+            'role' => 'manager'
         ]);
 
-        // 2. Akun Admin Keuangan (Si Kasir/Bendahara)
-        User::factory()->create([
-            'name' => 'Bu Siti (Admin Keuangan)',
-            'email' => 'admin.keuangan@koperasi.com',
+        User::create([
+            'name' => 'Bu Siti (Finance)',
+            'email' => 'finance@koperasi.com',
             'password' => Hash::make('password'),
-            'role' => 'finance',
+            'role' => 'finance'
         ]);
 
-        // 3. Akun Orang Tua (User Biasa)
-        $ortu = User::factory()->create([
-            'name' => 'Bapak Budi (Ortu)',
-            'email' => 'ortu@gmail.com',
-            'password' => Hash::make('password'),
-            'role' => 'parent',
-        ]);
+        $parents = [];
 
-        // 2. Buat Armada (Fleets)
-        // Kita sebar pool-nya di beberapa titik strategis
-        $fleets = [
-            [
-                'name' => 'Armada 01 - Elf Long',
-                'capacity' => 15,
-                'base_latitude' => -6.812300, // Sekitaran Pasar Lembang
-                'base_longitude' => 107.614500,
-            ],
-            [
-                'name' => 'Armada 02 - Avanza',
-                'capacity' => 6,
-                'base_latitude' => -6.830000, // Sekitaran Farmhouse
-                'base_longitude' => 107.605000,
-            ],
-            [
-                'name' => 'Armada 03 - Luxio',
-                'capacity' => 7,
-                'base_latitude' => -6.800000, // Sekitaran Cikahuripan
-                'base_longitude' => 107.620000,
-            ],
-        ];
+        for ($i=1;$i<=30;$i++) {
 
-        foreach ($fleets as $f) {
-            Fleet::create($f);
-        }
-
-        // 3. Buat Data Siswa (Dummy Lembang Area)
-        // Kita sebar di 3 cluster: Setiabudi, Maribaya, Parongpong
-        $studentsData = [
-            // Cluster A: Setiabudi/Ledeng (Jauh dari sekolah)
-            ['name' => 'Anak A (Setiabudi)', 'lat' => -6.860123, 'lng' => 107.590123, 'status' => 'active', 'pay' => 'paid'],
-            ['name' => 'Anak B (Setiabudi)', 'lat' => -6.862123, 'lng' => 107.592123, 'status' => 'active', 'pay' => 'paid'],
-
-            // Cluster B: Maribaya (Timur)
-            ['name' => 'Anak C (Maribaya)', 'lat' => -6.818000, 'lng' => 107.650000, 'status' => 'active', 'pay' => 'unpaid'], // Nunggak!
-            ['name' => 'Anak D (Maribaya)', 'lat' => -6.819000, 'lng' => 107.651000, 'status' => 'active', 'pay' => 'paid'],
-
-            // Cluster C: Parongpong (Barat)
-            ['name' => 'Anak E (Parongpong)', 'lat' => -6.805000, 'lng' => 107.570000, 'status' => 'active', 'pay' => 'paid'],
-            ['name' => 'Anak F (Parongpong)', 'lat' => -6.806000, 'lng' => 107.572000, 'status' => 'registered', 'pay' => 'unpaid'], // Baru daftar
-
-            // Cluster D: Dekat Sekolah
-            ['name' => 'Anak G (Alun-alun)', 'lat' => -6.816000, 'lng' => 107.617000, 'status' => 'active', 'pay' => 'paid'],
-        ];
-
-        foreach ($studentsData as $s) {
-            // Hitung jarak garis lurus ke sekolah (Estimasi Harga)
-            $distToSchool = $this->calculateHaversine($s['lat'], $s['lng'], self::SCHOOL_LAT, self::SCHOOL_LNG);
-            $price = $distToSchool * 2000; // Misal Rp 2.000 per KM
-
-            Student::create([
-                'user_id' => $ortu->id, // Semua anak ini milik Pak Budi dulu biar gampang tes
-                'name' => $s['name'],
-                'school_level' => 'SD',
-                'address_text' => 'Alamat Dummy Area Lembang',
-                'latitude' => $s['lat'],
-                'longitude' => $s['lng'],
-                'distance_to_school_meters' => $distToSchool * 1000, // Convert KM to Meter
-                'price_per_month' => $price,
-                'status' => $s['status'],
-                'payment_status' => $s['pay'],
+            $parents[] = User::create([
+                'name' => 'Parent '.$i,
+                'email' => 'parent'.$i.'@mail.com',
+                'password' => Hash::make('password'),
+                'role' => 'parent'
             ]);
         }
 
-        // 4. GENERATE DISTANCE MATRIX (CACHE)
-        // Ini trik supaya Algoritma kamu nanti bisa jalan tanpa nembak Google Maps
-        // Kita hitung jarak antar SEMUA siswa dan simpan di DB.
+        /*
+        |--------------------------------------------------------------------------
+        | FLEETS
+        |--------------------------------------------------------------------------
+        */
 
-        $allStudents = Student::all();
+        Fleet::create([
+            'name' => 'Elf 01',
+            'capacity' => 12,
+            'driver_name' => 'Pak Cecep',
+            'vehicle_type' => 'Elf',
+            'license_plate' => 'D 1234 AB',
+            'base_latitude' => -6.8123,
+            'base_longitude' => 107.6145,
+            'is_active' => true
+        ]);
 
-        foreach ($allStudents as $origin) {
-            foreach ($allStudents as $destination) {
-                if ($origin->id != $destination->id) {
+        Fleet::create([
+            'name' => 'Avanza 01',
+            'capacity' => 6,
+            'driver_name' => 'Pak Asep',
+            'vehicle_type' => 'Avanza',
+            'license_plate' => 'D 2234 AC',
+            'base_latitude' => -6.8300,
+            'base_longitude' => 107.6050,
+            'is_active' => true
+        ]);
 
-                    // Hitung jarak (KM)
-                    $distKm = $this->calculateHaversine(
-                        $origin->latitude,
-                        $origin->longitude,
-                        $destination->latitude,
-                        $destination->longitude
-                    );
+        Fleet::create([
+            'name' => 'Luxio 01',
+            'capacity' => 7,
+            'driver_name' => 'Pak Dedi',
+            'vehicle_type' => 'Luxio',
+            'license_plate' => 'D 9988 XY',
+            'base_latitude' => -6.8000,
+            'base_longitude' => 107.6200,
+            'is_active' => true
+        ]);
 
-                    // Kita asumsikan kecepatan rata-rata 30 KM/Jam di Lembang (macet dikit)
-                    // Waktu (Jam) = Jarak / Kecepatan
-                    $timeHours = $distKm / 30;
-                    $timeSeconds = $timeHours * 3600;
+        Fleet::create([
+            'name' => 'Elf 02',
+            'capacity' => 12,
+            'driver_name' => 'Pak Ujang',
+            'vehicle_type' => 'Elf',
+            'license_plate' => 'D 7777 ZZ',
+            'base_latitude' => -6.8450,
+            'base_longitude' => 107.6250,
+            'is_active' => true
+        ]);
 
-                    DistanceMatrix::create([
-                        'origin_id' => $origin->id,
-                        'origin_type' => Student::class,
-                        'destination_id' => $destination->id,
-                        'destination_type' => Student::class,
-                        'distance_meters' => $distKm * 1000,
-                        'duration_seconds' => $timeSeconds,
-                    ]);
-                }
-            }
+        /*
+        |--------------------------------------------------------------------------
+        | STUDENT AREA CLUSTERS (Bandung Utara)
+        |--------------------------------------------------------------------------
+        */
+
+        $areas = [
+
+            ['lat'=>-6.8600,'lng'=>107.5900], // Setiabudi
+            ['lat'=>-6.8500,'lng'=>107.6100], // Dago
+            ['lat'=>-6.8400,'lng'=>107.6200], // Ciumbuleuit
+            ['lat'=>-6.8300,'lng'=>107.6400], // Lembang
+            ['lat'=>-6.8800,'lng'=>107.6000], // Parongpong
+            ['lat'=>-6.8100,'lng'=>107.6500], // Maribaya
+
+        ];
+
+        $levels = ['TK','SD','SMP'];
+
+        $sessions = [
+            '13:00:00',
+            '13:30:00',
+            '14:30:00',
+            '15:30:00',
+            '15:45:00'
+        ];
+
+        $services = [
+            'full',
+            'pickup_only',
+            'dropoff_only'
+        ];
+
+        /*
+        |--------------------------------------------------------------------------
+        | GENERATE 30 STUDENTS
+        |--------------------------------------------------------------------------
+        */
+
+        for ($i=0;$i<30;$i++) {
+
+            $area = $areas[array_rand($areas)];
+
+            $lat = $area['lat'] + (rand(-50,50)/10000);
+            $lng = $area['lng'] + (rand(-50,50)/10000);
+
+            $dist = $this->haversine(
+                $lat,
+                $lng,
+                self::SCHOOL_LAT,
+                self::SCHOOL_LNG
+            );
+
+            Student::create([
+
+                'user_id' => $parents[$i]->id,
+
+                'name' => 'Siswa '.($i+1),
+
+                'school_level' => $levels[array_rand($levels)],
+
+                'class_room' => rand(1,9),
+
+                'service_type' => $services[array_rand($services)],
+
+                'session_in' => '06:30:00',
+
+                'session_out' => $sessions[array_rand($sessions)],
+
+                'address_text' => 'Bandung Utara',
+
+                'latitude' => $lat,
+                'longitude' => $lng,
+
+                'distance_to_school_meters' => $dist * 1000,
+
+                'price_per_month' => $dist * 2000,
+
+                'payment_status' => 'paid',
+
+                'status' => 'registered'
+            ]);
         }
     }
 
-    /**
-     * Rumus Haversine (Hitung Jarak Garis Lurus antar 2 Koordinat Bumi)
-     * Return: Kilometers
-     */
-    private function calculateHaversine($lat1, $lon1, $lat2, $lon2)
+    private function haversine($lat1,$lon1,$lat2,$lon2)
     {
-        $earthRadius = 6371; // Radius bumi dalam KM
+        $earthRadius = 6371;
 
-        $dLat = deg2rad($lat2 - $lat1);
-        $dLon = deg2rad($lon2 - $lon1);
+        $dLat = deg2rad($lat2-$lat1);
+        $dLon = deg2rad($lon2-$lon1);
 
-        $a = sin($dLat / 2) * sin($dLat / 2) +
-            cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
-            sin($dLon / 2) * sin($dLon / 2);
+        $a =
+            sin($dLat/2)*sin($dLat/2) +
+            cos(deg2rad($lat1)) *
+            cos(deg2rad($lat2)) *
+            sin($dLon/2)*sin($dLon/2);
 
-        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        $c = 2 * atan2(sqrt($a), sqrt(1-$a));
 
         return $earthRadius * $c;
     }
