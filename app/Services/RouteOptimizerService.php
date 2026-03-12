@@ -102,24 +102,24 @@ class RouteOptimizerService
                 $fleets->count()
             );
 
-            foreach ($clusters as $clusterIndex => $clusterStudents) {
+            $clusters = $this->clusterByKMeans(
+                $students->values()->all(),
+                $fleets->count()
+            );
 
-                if (empty($clusterStudents)) continue;
+            $fleetStudents = $this->balanceClusterCapacity($clusters, $fleets);
 
-                $fleet = $fleets[$clusterIndex % $fleets->count()];
+            foreach ($fleetStudents as $fleetId => $studentsForFleet) {
 
-                $clusterStudents = array_slice(
-                    $clusterStudents,
-                    0,
-                    $fleet->capacity
-                );
+                if (empty($studentsForFleet)) continue;
 
-                $route = $this->nearestNeighborRoute($clusterStudents);
+                $fleet = $fleets->firstWhere('id', $fleetId);
+
+                $route = $this->nearestNeighborRoute($studentsForFleet);
 
                 $route = $this->twoOptImprove($route);
 
                 foreach ($route as $order => $student) {
-
                     $student->update([
                         'afternoon_fleet_id' => $fleet->id,
                         'afternoon_route_order' => $order + 1
