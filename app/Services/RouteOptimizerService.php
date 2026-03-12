@@ -7,8 +7,8 @@ use App\Models\Student;
 
 class RouteOptimizerService
 {
-    const SCHOOL_LAT = -6.815348;
-    const SCHOOL_LNG = 107.616659;
+    const SCHOOL_LAT = -6.826864390637824;
+    const SCHOOL_LNG = 107.63886429303408;
 
     public function optimize()
     {
@@ -30,9 +30,12 @@ class RouteOptimizerService
             ->update(['status' => 'active']);
     }
 
-    /**
-     * MORNING ROUTE
-     */
+    /*
+    |--------------------------------------------------------------------------
+    | MORNING ROUTE
+    |--------------------------------------------------------------------------
+    */
+
     private function optimizeMorningRoutes()
     {
         $fleets = Fleet::where('is_active', true)->get();
@@ -43,58 +46,24 @@ class RouteOptimizerService
 
         if ($fleets->isEmpty() || $students->isEmpty()) return;
 
-        // =========================
-        // STEP 1: ASSIGN STUDENTS
-        // =========================
+        $clusters = $this->clusterByKMeans(
+            $students->values()->all(),
+            $fleets->count()
+        );
 
-        $fleetCapacities = [];
-        $fleetStudents = [];
+        // balancing
+        $fleetStudents = $this->balanceClusterCapacity($clusters, $fleets);
 
-        foreach ($fleets as $fleet) {
-            $fleetCapacities[$fleet->id] = $fleet->capacity;
-            $fleetStudents[$fleet->id] = [];
-        }
-
-        foreach ($students as $student) {
-
-            $bestFleetId = null;
-            $minDistance = PHP_INT_MAX;
-
-            foreach ($fleets as $fleet) {
-
-                if ($fleetCapacities[$fleet->id] <= 0) continue;
-
-                $distance = $this->calculateDistance(
-                    $student->latitude,
-                    $student->longitude,
-                    $fleet->base_latitude,
-                    $fleet->base_longitude
-                );
-
-                if ($distance < $minDistance) {
-                    $minDistance = $distance;
-                    $bestFleetId = $fleet->id;
-                }
-            }
-
-            if ($bestFleetId) {
-
-                $fleetStudents[$bestFleetId][] = $student;
-                $fleetCapacities[$bestFleetId]--;
-            }
-        }
-
-        // =========================
-        // STEP 2: OPTIMIZE ROUTE
-        // =========================
-
-        foreach ($fleets as $fleet) {
-
-            $studentsForFleet = $fleetStudents[$fleet->id];
+        foreach ($fleetStudents as $fleetId => $studentsForFleet) {
 
             if (empty($studentsForFleet)) continue;
 
-            $route = $this->nearestNeighborFromBase($studentsForFleet, $fleet);
+            $fleet = $fleets->firstWhere('id', $fleetId);
+
+            $route = $this->nearestNeighborFromBase(
+                $studentsForFleet,
+                $fleet
+            );
 
             $route = $this->twoOptImprove($route);
 
@@ -108,9 +77,12 @@ class RouteOptimizerService
         }
     }
 
-    /**
-     * AFTERNOON ROUTE (Improved VRP-like)
-     */
+    /*
+    |--------------------------------------------------------------------------
+    | AFTERNOON ROUTE
+    |--------------------------------------------------------------------------
+    */
+
     private function optimizeAfternoonRoutes()
     {
         $fleets = Fleet::where('is_active', true)->get();
@@ -125,7 +97,10 @@ class RouteOptimizerService
 
         foreach ($groupedBySession as $session => $students) {
 
-            $clusters = $this->clusterByDirection($students->values()->all(), $fleets->count());
+            $clusters = $this->clusterByKMeans(
+                $students->values()->all(),
+                $fleets->count()
+            );
 
             foreach ($clusters as $clusterIndex => $clusterStudents) {
 
@@ -133,9 +108,11 @@ class RouteOptimizerService
 
                 $fleet = $fleets[$clusterIndex % $fleets->count()];
 
-                if (count($clusterStudents) > $fleet->capacity) {
-                    $clusterStudents = array_slice($clusterStudents, 0, $fleet->capacity);
-                }
+                $clusterStudents = array_slice(
+                    $clusterStudents,
+                    0,
+                    $fleet->capacity
+                );
 
                 $route = $this->nearestNeighborRoute($clusterStudents);
 
@@ -152,33 +129,134 @@ class RouteOptimizerService
         }
     }
 
-    /**
-     * Directional clustering based on angle from school
-     */
-    private function clusterByDirection($students, $clusterCount)
+    /*
+    |--------------------------------------------------------------------------
+    | K-MEANS CLUSTERING
+    |--------------------------------------------------------------------------
+    */
+
+    private function clusterByKMeans($students, $k)
     {
-        $clusters = array_fill(0, $clusterCount, []);
+        $studentCount = count($students);
 
-        foreach ($students as $student) {
+        if ($studentCount == 0) {
+            return [];
+        }
 
-            $angle = atan2(
-                $student->latitude - self::SCHOOL_LAT,
-                $student->longitude - self::SCHOOL_LNG
-            );
+        // cluster tidak boleh lebih besar dari jumlah siswa
+        $k = min($k, $studentCount);
 
-            $index = intval(($angle + M_PI) / (2 * M_PI) * $clusterCount);
+        $centroids = [];
 
-            if ($index >= $clusterCount) $index = $clusterCount - 1;
+        shuffle($students);
 
-            $clusters[$index][] = $student;
+        for ($i = 0; $i < $k; $i++) {
+            $centroids[$i] = [
+                'lat' => $students[$i]->latitude,
+                'lng' => $students[$i]->longitude
+            ];
+        }
+
+        for ($iteration = 0; $iteration < 10; $iteration++) {
+
+            $clusters = array_fill(0, $k, []);
+
+            foreach ($students as $student) {
+
+                $bestCluster = 0;
+                $minDistance = PHP_INT_MAX;
+
+                foreach ($centroids as $index => $centroid) {
+
+                    $distance = $this->calculateDistance(
+                        $student->latitude,
+                        $student->longitude,
+                        $centroid['lat'],
+                        $centroid['lng']
+                    );
+
+                    if ($distance < $minDistance) {
+
+                        $minDistance = $distance;
+                        $bestCluster = $index;
+                    }
+                }
+
+                $clusters[$bestCluster][] = $student;
+            }
+
+            foreach ($clusters as $index => $cluster) {
+
+                if (empty($cluster)) continue;
+
+                $latSum = 0;
+                $lngSum = 0;
+
+                foreach ($cluster as $student) {
+
+                    $latSum += $student->latitude;
+                    $lngSum += $student->longitude;
+                }
+
+                $centroids[$index] = [
+                    'lat' => $latSum / count($cluster),
+                    'lng' => $lngSum / count($cluster)
+                ];
+            }
         }
 
         return $clusters;
     }
 
-    /**
-     * Nearest Neighbor route construction
-     */
+    private function balanceClusterCapacity($clusters, $fleets)
+    {
+        $fleetStudents = [];
+
+        foreach ($fleets as $fleet) {
+            $fleetStudents[$fleet->id] = [];
+        }
+
+        foreach ($clusters as $cluster) {
+
+            foreach ($cluster as $student) {
+
+                $bestFleet = null;
+                $bestDistance = PHP_INT_MAX;
+
+                foreach ($fleets as $fleet) {
+
+                    if (count($fleetStudents[$fleet->id]) >= $fleet->capacity) {
+                        continue;
+                    }
+
+                    $distance = $this->calculateDistance(
+                        $student->latitude,
+                        $student->longitude,
+                        $fleet->base_latitude,
+                        $fleet->base_longitude
+                    );
+
+                    if ($distance < $bestDistance) {
+                        $bestDistance = $distance;
+                        $bestFleet = $fleet;
+                    }
+                }
+
+                if ($bestFleet) {
+                    $fleetStudents[$bestFleet->id][] = $student;
+                }
+            }
+        }
+
+        return $fleetStudents;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | ROUTE CONSTRUCTION
+    |--------------------------------------------------------------------------
+    */
+
     private function nearestNeighborRoute($students)
     {
         $route = [];
@@ -202,6 +280,7 @@ class RouteOptimizerService
                 );
 
                 if ($distance < $minDistance) {
+
                     $minDistance = $distance;
                     $nearest = $student;
                     $nearestKey = $key;
@@ -219,9 +298,53 @@ class RouteOptimizerService
         return $route;
     }
 
-    /**
-     * 2-opt improvement
-     */
+    private function nearestNeighborFromBase($students, $fleet)
+    {
+        $route = [];
+
+        $currentLat = $fleet->base_latitude;
+        $currentLng = $fleet->base_longitude;
+
+        while (count($students) > 0) {
+
+            $nearest = null;
+            $nearestKey = null;
+            $minDistance = PHP_INT_MAX;
+
+            foreach ($students as $key => $student) {
+
+                $distance = $this->calculateDistance(
+                    $currentLat,
+                    $currentLng,
+                    $student->latitude,
+                    $student->longitude
+                );
+
+                if ($distance < $minDistance) {
+
+                    $minDistance = $distance;
+                    $nearest = $student;
+                    $nearestKey = $key;
+                }
+            }
+
+            $route[] = $nearest;
+
+            $currentLat = $nearest->latitude;
+            $currentLng = $nearest->longitude;
+
+            unset($students[$nearestKey]);
+        }
+
+        return $route;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | 2-OPT IMPROVEMENT
+    |--------------------------------------------------------------------------
+    */
+
     private function twoOptImprove($route)
     {
         $improved = true;
@@ -276,49 +399,12 @@ class RouteOptimizerService
         return $distance;
     }
 
-    private function nearestNeighborFromBase($students, $fleet)
-    {
-        $route = [];
+    /*
+    |--------------------------------------------------------------------------
+    | HAVERSINE DISTANCE
+    |--------------------------------------------------------------------------
+    */
 
-        $currentLat = $fleet->base_latitude;
-        $currentLng = $fleet->base_longitude;
-
-        while (count($students) > 0) {
-
-            $nearest = null;
-            $nearestKey = null;
-            $minDistance = PHP_INT_MAX;
-
-            foreach ($students as $key => $student) {
-
-                $distance = $this->calculateDistance(
-                    $currentLat,
-                    $currentLng,
-                    $student->latitude,
-                    $student->longitude
-                );
-
-                if ($distance < $minDistance) {
-                    $minDistance = $distance;
-                    $nearest = $student;
-                    $nearestKey = $key;
-                }
-            }
-
-            $route[] = $nearest;
-
-            $currentLat = $nearest->latitude;
-            $currentLng = $nearest->longitude;
-
-            unset($students[$nearestKey]);
-        }
-
-        return $route;
-    }
-
-    /**
-     * Haversine formula
-     */
     private function calculateDistance($lat1, $lon1, $lat2, $lon2)
     {
         $earthRadius = 6371;
@@ -326,7 +412,8 @@ class RouteOptimizerService
         $dLat = deg2rad($lat2 - $lat1);
         $dLon = deg2rad($lon2 - $lon1);
 
-        $a = sin($dLat / 2) * sin($dLat / 2) +
+        $a =
+            sin($dLat / 2) * sin($dLat / 2) +
             cos(deg2rad($lat1)) * cos(deg2rad($lat2)) *
             sin($dLon / 2) * sin($dLon / 2);
 
