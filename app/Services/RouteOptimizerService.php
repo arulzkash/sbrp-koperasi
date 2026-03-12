@@ -102,11 +102,6 @@ class RouteOptimizerService
                 $fleets->count()
             );
 
-            $clusters = $this->clusterByKMeans(
-                $students->values()->all(),
-                $fleets->count()
-            );
-
             $fleetStudents = $this->balanceClusterCapacity($clusters, $fleets);
 
             foreach ($fleetStudents as $fleetId => $studentsForFleet) {
