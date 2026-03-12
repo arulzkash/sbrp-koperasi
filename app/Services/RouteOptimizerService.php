@@ -43,9 +43,16 @@ class RouteOptimizerService
 
         if ($fleets->isEmpty() || $students->isEmpty()) return;
 
+        // =========================
+        // STEP 1: ASSIGN STUDENTS
+        // =========================
+
         $fleetCapacities = [];
+        $fleetStudents = [];
+
         foreach ($fleets as $fleet) {
             $fleetCapacities[$fleet->id] = $fleet->capacity;
+            $fleetStudents[$fleet->id] = [];
         }
 
         foreach ($students as $student) {
@@ -72,14 +79,31 @@ class RouteOptimizerService
 
             if ($bestFleetId) {
 
-                $order = Student::where('morning_fleet_id', $bestFleetId)->count() + 1;
+                $fleetStudents[$bestFleetId][] = $student;
+                $fleetCapacities[$bestFleetId]--;
+            }
+        }
+
+        // =========================
+        // STEP 2: OPTIMIZE ROUTE
+        // =========================
+
+        foreach ($fleets as $fleet) {
+
+            $studentsForFleet = $fleetStudents[$fleet->id];
+
+            if (empty($studentsForFleet)) continue;
+
+            $route = $this->nearestNeighborFromBase($studentsForFleet, $fleet);
+
+            $route = $this->twoOptImprove($route);
+
+            foreach ($route as $order => $student) {
 
                 $student->update([
-                    'morning_fleet_id' => $bestFleetId,
-                    'morning_route_order' => $order
+                    'morning_fleet_id' => $fleet->id,
+                    'morning_route_order' => $order + 1
                 ]);
-
-                $fleetCapacities[$bestFleetId]--;
             }
         }
     }
@@ -250,6 +274,46 @@ class RouteOptimizerService
         }
 
         return $distance;
+    }
+
+    private function nearestNeighborFromBase($students, $fleet)
+    {
+        $route = [];
+
+        $currentLat = $fleet->base_latitude;
+        $currentLng = $fleet->base_longitude;
+
+        while (count($students) > 0) {
+
+            $nearest = null;
+            $nearestKey = null;
+            $minDistance = PHP_INT_MAX;
+
+            foreach ($students as $key => $student) {
+
+                $distance = $this->calculateDistance(
+                    $currentLat,
+                    $currentLng,
+                    $student->latitude,
+                    $student->longitude
+                );
+
+                if ($distance < $minDistance) {
+                    $minDistance = $distance;
+                    $nearest = $student;
+                    $nearestKey = $key;
+                }
+            }
+
+            $route[] = $nearest;
+
+            $currentLat = $nearest->latitude;
+            $currentLng = $nearest->longitude;
+
+            unset($students[$nearestKey]);
+        }
+
+        return $route;
     }
 
     /**
