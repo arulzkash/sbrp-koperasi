@@ -38,7 +38,7 @@ class DatabaseSeeder extends Seeder
 
         $parents = [];
 
-        for ($i=1;$i<=30;$i++) {
+        for ($i=1;$i<=220;$i++) {
 
             $parents[] = User::create([
                 'name' => 'Parent '.$i,
@@ -48,72 +48,80 @@ class DatabaseSeeder extends Seeder
             ]);
         }
 
+
         /*
         |--------------------------------------------------------------------------
-        | FLEETS
+        | FLEETS (REAL DRIVER LIST)
         |--------------------------------------------------------------------------
         */
 
-        Fleet::create([
-            'name' => 'Elf 01',
-            'capacity' => 12,
-            'driver_name' => 'Pak Cecep',
-            'vehicle_type' => 'Elf',
-            'license_plate' => 'D 1234 AB',
-            'base_latitude' => -6.8123,
-            'base_longitude' => 107.6145,
-            'is_active' => true
-        ]);
+        $drivers = [
 
-        Fleet::create([
-            'name' => 'Avanza 01',
-            'capacity' => 6,
-            'driver_name' => 'Pak Asep',
-            'vehicle_type' => 'Avanza',
-            'license_plate' => 'D 2234 AC',
-            'base_latitude' => -6.8300,
-            'base_longitude' => 107.6050,
-            'is_active' => true
-        ]);
+            ['name'=>'Cecep','vehicle'=>'Elf','capacity'=>12],
+            ['name'=>'Sukma','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Sandi Safaat','vehicle'=>'Luxio','capacity'=>7],
+            ['name'=>'Hendra','vehicle'=>'Elf','capacity'=>12],
+            ['name'=>'Wira','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Nandar','vehicle'=>'Luxio','capacity'=>7],
+            ['name'=>'Anto','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Rahmat','vehicle'=>'Elf','capacity'=>12],
+            ['name'=>'Sandy','vehicle'=>'Luxio','capacity'=>7],
+            ['name'=>'Ade','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Jajang','vehicle'=>'Elf','capacity'=>12],
+            ['name'=>'Asep','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Wawan Irawan','vehicle'=>'Luxio','capacity'=>7],
+            ['name'=>'Acep','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Iwan','vehicle'=>'Luxio','capacity'=>7],
+            ['name'=>'Yanto','vehicle'=>'Avanza','capacity'=>6],
+            ['name'=>'Ajat','vehicle'=>'Elf','capacity'=>12],
+            ['name'=>'Bu Tuti','vehicle'=>'Avanza','capacity'=>6],
 
-        Fleet::create([
-            'name' => 'Luxio 01',
-            'capacity' => 7,
-            'driver_name' => 'Pak Dedi',
-            'vehicle_type' => 'Luxio',
-            'license_plate' => 'D 9988 XY',
-            'base_latitude' => -6.8000,
-            'base_longitude' => 107.6200,
-            'is_active' => true
-        ]);
+        ];
 
-        Fleet::create([
-            'name' => 'Elf 02',
-            'capacity' => 12,
-            'driver_name' => 'Pak Ujang',
-            'vehicle_type' => 'Elf',
-            'license_plate' => 'D 7777 ZZ',
-            'base_latitude' => -6.8450,
-            'base_longitude' => 107.6250,
-            'is_active' => true
-        ]);
+        foreach ($drivers as $i => $driver) {
+
+            Fleet::create([
+
+                'name' => $driver['vehicle'].' '.str_pad($i+1,2,'0',STR_PAD_LEFT),
+                'capacity' => $driver['capacity'],
+                'driver_name' => 'Pak '.$driver['name'],
+                'vehicle_type' => $driver['vehicle'],
+                'license_plate' => 'D '.rand(1000,9999).' XX',
+
+                'base_latitude' => -6.82 + (rand(-200,200)/10000),
+                'base_longitude' => 107.63 + (rand(-200,200)/10000),
+
+                'is_active' => true
+            ]);
+        }
+
 
         /*
         |--------------------------------------------------------------------------
-        | STUDENT AREA CLUSTERS (Bandung Utara)
+        | REAL AREA CLUSTERS
         |--------------------------------------------------------------------------
         */
 
         $areas = [
 
-            ['lat'=>-6.8600,'lng'=>107.5900], // Setiabudi
-            ['lat'=>-6.8500,'lng'=>107.6100], // Dago
-            ['lat'=>-6.8400,'lng'=>107.6200], // Ciumbuleuit
-            ['lat'=>-6.8300,'lng'=>107.6400], // Lembang
-            ['lat'=>-6.8800,'lng'=>107.6000], // Parongpong
-            ['lat'=>-6.8100,'lng'=>107.6500], // Maribaya
+            ['name'=>'Langensari','lat'=>-6.8115,'lng'=>107.6172,'count'=>40],
+            ['name'=>'Sukajaya','lat'=>-6.8058,'lng'=>107.6105,'count'=>26],
+            ['name'=>'Cibodas','lat'=>-6.7985,'lng'=>107.6120,'count'=>22],
+            ['name'=>'Wangunsari','lat'=>-6.8032,'lng'=>107.5980,'count'=>18],
+            ['name'=>'Gunung Sari','lat'=>-6.8090,'lng'=>107.6150,'count'=>15],
+
+            ['name'=>'Cihideung','lat'=>-6.8420,'lng'=>107.5900,'count'=>26],
+            ['name'=>'Cigugur Girang','lat'=>-6.8450,'lng'=>107.5850,'count'=>22],
+            ['name'=>'Cihanjuang','lat'=>-6.8480,'lng'=>107.5750,'count'=>18],
+
+            ['name'=>'Sersan Bajuri','lat'=>-6.8350,'lng'=>107.5950,'count'=>15],
+
+            ['name'=>'Maribaya','lat'=>-6.8000,'lng'=>107.6400,'count'=>8],
+            ['name'=>'Kolonel Masturi','lat'=>-6.8200,'lng'=>107.6000,'count'=>6],
+            ['name'=>'Karyawangi','lat'=>-6.8300,'lng'=>107.5700,'count'=>4],
 
         ];
+
 
         $levels = ['TK','SD','SMP'];
 
@@ -125,66 +133,83 @@ class DatabaseSeeder extends Seeder
             '15:45:00'
         ];
 
-        $services = [
-            'full',
-            'pickup_only',
-            'dropoff_only'
-        ];
 
         /*
         |--------------------------------------------------------------------------
-        | GENERATE 30 STUDENTS
+        | SERVICE DISTRIBUTION (REALISTIC)
         |--------------------------------------------------------------------------
         */
 
-        for ($i=0;$i<30;$i++) {
+        $services = [
+            'full','full','full','full','full','full','full',
+            'pickup_only','pickup_only',
+            'dropoff_only'
+        ];
 
-            $area = $areas[array_rand($areas)];
 
-            $lat = $area['lat'] + (rand(-50,50)/10000);
-            $lng = $area['lng'] + (rand(-50,50)/10000);
+        /*
+        |--------------------------------------------------------------------------
+        | GENERATE STUDENTS
+        |--------------------------------------------------------------------------
+        */
 
-            $dist = $this->haversine(
-                $lat,
-                $lng,
-                self::SCHOOL_LAT,
-                self::SCHOOL_LNG
-            );
+        $studentIndex = 0;
 
-            Student::create([
+        foreach ($areas as $area) {
 
-                'user_id' => $parents[$i]->id,
+            for ($i=0;$i<$area['count'];$i++) {
 
-                'name' => 'Siswa '.($i+1),
+                $lat = $area['lat'] + (rand(-35,35)/10000);
+                $lng = $area['lng'] + (rand(-35,35)/10000);
 
-                'school_level' => $levels[array_rand($levels)],
+                $dist = $this->haversine(
+                    $lat,
+                    $lng,
+                    self::SCHOOL_LAT,
+                    self::SCHOOL_LNG
+                );
 
-                'class_room' => rand(1,9),
+                Student::create([
 
-                'service_type' => $services[array_rand($services)],
+                    'user_id' => $parents[$studentIndex]->id,
 
-                'session_in' => '06:30:00',
+                    'name' => 'Siswa '.($studentIndex+1),
 
-                'session_out' => $sessions[array_rand($sessions)],
+                    'school_level' => $levels[array_rand($levels)],
 
-                'address_text' => 'Bandung Utara',
+                    'class_room' => rand(1,9),
 
-                'latitude' => $lat,
-                'longitude' => $lng,
+                    'service_type' => $services[array_rand($services)],
 
-                'distance_to_school_meters' => $dist * 1000,
+                    'session_in' => '06:30:00',
 
-                'price_per_month' => $dist * 2000,
+                    'session_out' => $sessions[array_rand($sessions)],
 
-                'payment_status' => 'paid',
+                    'address_text' => $area['name'],
 
-                'status' => 'registered'
-            ]);
+                    'latitude' => $lat,
+                    'longitude' => $lng,
+
+                    'distance_to_school_meters' => $dist * 1000,
+
+                    'price_per_month' => $dist * 2000,
+
+                    'payment_status' => 'paid',
+
+                    'status' => 'registered'
+                ]);
+
+                $studentIndex++;
+            }
         }
+
     }
+
+
 
     private function haversine($lat1,$lon1,$lat2,$lon2)
     {
+
         $earthRadius = 6371;
 
         $dLat = deg2rad($lat2-$lat1);
@@ -200,4 +225,5 @@ class DatabaseSeeder extends Seeder
 
         return $earthRadius * $c;
     }
+
 }
