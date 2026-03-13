@@ -107,6 +107,10 @@ const renderMap = () => {
     bounds.push(SCHOOL_COORD);
 
     sidebarData.value.forEach((fleet, index) => {
+        if (activeFleetId.value !== null && activeFleetId.value !== fleet.id) {
+            return;
+        }
+
         const fleetColor = colors[index % colors.length];
 
         const routeCoords = [];
