@@ -106,8 +106,10 @@ const renderMap = () => {
 
     bounds.push(SCHOOL_COORD);
 
+    const hasActive = activeFleetId.value !== null;
+
     sidebarData.value.forEach((fleet, index) => {
-        if (activeFleetId.value !== null && activeFleetId.value !== fleet.id) {
+        if (hasActive && activeFleetId.value !== fleet.id) {
             return;
         }
 
@@ -130,11 +132,13 @@ const renderMap = () => {
                     icon: L.divIcon({
                         html: `<div style="
                             background:${fleetColor};
-                            width:14px;
-                            height:14px;
+                            width:${hasActive ? 16 : 10}px;
+                            height:${hasActive ? 16 : 10}px;
                             border:2px solid black;">
                         </div>`,
                         className: "",
+                        iconSize: hasActive ? [16, 16] : [10, 10],
+                        iconAnchor: hasActive ? [8, 8] : [5, 5]
                     }),
                 })
                     .addTo(markersLayer)
@@ -159,10 +163,8 @@ const renderMap = () => {
             routeCoords.push(coord);
             bounds.push(coord);
 
-            const marker = L.marker(coord, {
-                icon: L.divIcon({
-                    html: `
-                    <div style="
+            const iconHtml = hasActive
+                ? `<div style="
                         background:${fleetColor};
                         width:26px;
                         height:26px;
@@ -177,9 +179,23 @@ const renderMap = () => {
                         box-shadow:0 0 4px rgba(0,0,0,0.4);
                     ">
                         ${order}
-                    </div>
-                    `,
-                    className: "",
+                    </div>`
+                : `<div style="
+                        background:${fleetColor};
+                        width:12px;
+                        height:12px;
+                        border-radius:50%;
+                        border:2px solid white;
+                        box-shadow:0 0 2px rgba(0,0,0,0.4);
+                        opacity:0.9;
+                    "></div>`;
+
+            const marker = L.marker(coord, {
+                icon: L.divIcon({
+                    html: iconHtml,
+                    className: "transition-all duration-300 hover:scale-125 hover:z-50",
+                    iconSize: hasActive ? [26, 26] : [12, 12],
+                    iconAnchor: hasActive ? [13, 13] : [6, 6]
                 }),
             });
 
@@ -266,15 +282,23 @@ const drawRouteWithOSRM = async (
     const drawPolyline = (routePoints) => {
         L.polyline(routePoints, {
             color: color,
-            weight: hasActive && isActive ? 6 : 3,
-            opacity: hasActive ? (isActive ? 1 : 0.25) : 0.9,
-            dashArray: hasActive ? (isActive ? null : "6,6") : null,
+            weight: hasActive ? 5 : 2,
+            opacity: hasActive ? 1 : 0.4,
+            dashArray: null,
         }).addTo(markersLayer);
 
         if (animationEnabled.value && isActive) {
             animateVehicle(routePoints);
         }
     };
+
+    // --- MENCEGAH RATE LIMIT API OSRM ---
+    // Request ke public OSRM dibatasi. Jika me-render 20 armada sekaligus akan kena block (ERR_FAILED).
+    // Jadi di mode overview, kita tidak menggambar garis rute sama sekali (hanya titik-titik saja).
+    // OSRM HANYA di-fetch saat user fokus ke 1 armada tertentu (!isActive = false).
+    if (!isActive) {
+        return;
+    }
 
     // CACHE
     if (routeCache.has(coordString)) {
@@ -308,8 +332,8 @@ const drawRouteWithOSRM = async (
 
         L.polyline(coords, {
             color: color,
-            weight: isActive ? 6 : 3,
-            opacity: isActive ? 1 : 0.35,
+            weight: hasActive ? 5 : 2,
+            opacity: hasActive ? 1 : 0.4,
             dashArray: "5,10",
         }).addTo(markersLayer);
     }
