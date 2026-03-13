@@ -9,16 +9,17 @@ defineProps({
     canRegister: Boolean,
 });
 
-const SCHOOL_LAT = -6.815348;
-const SCHOOL_LNG = 107.616659;
+const SCHOOL_LAT = -6.826864390637824;
+const SCHOOL_LNG = 107.63886429303408;
 
 const userLat = ref(null);
 const userLng = ref(null);
 const distanceKm = ref(0);
 const estimatedPrice = ref(0);
+const estimatedPriceOneWay = ref(0);
 
-const BASE_PRICE = 100000;
-const PRICE_PER_KM = 2500;
+const BASE_PRICE = 200000;
+const PRICE_PER_KM = 50000;
 
 // State untuk Pencarian Alamat
 const searchQuery = ref("");
@@ -43,7 +44,7 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 };
 
 // Fungsi Utama untuk Update Titik, Jarak, dan Harga
-const updateLocation = (lat, lng) => {
+const updateLocation = async (lat, lng) => {
     userLat.value = lat;
     userLng.value = lng;
 
@@ -64,23 +65,59 @@ const updateLocation = (lat, lng) => {
         userMarker.setLatLng([lat, lng]);
     }
 
-    distanceKm.value = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
-    estimatedPrice.value = Math.round(
-        BASE_PRICE + distanceKm.value * PRICE_PER_KM * 30,
-    );
-
     if (routeLine) map.removeLayer(routeLine);
-    routeLine = L.polyline(
-        [
-            [lat, lng],
-            [SCHOOL_LAT, SCHOOL_LNG],
-        ],
-        {
-            color: "blue",
-            dashArray: "5, 10",
-            weight: 2,
-        },
-    ).addTo(map);
+
+    try {
+        // Menembak API OSRM Publik untuk mendapatkan Rute Jalan Raya Nyata
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${SCHOOL_LNG},${SCHOOL_LAT}?overview=full&geometries=geojson`;
+        const response = await fetch(osrmUrl);
+        const data = await response.json();
+
+        if (data && data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            
+            // Update Jarak (OSRM mengembalikan meter)
+            distanceKm.value = route.distance / 1000;
+            
+            // Gambar Garis Peta Real Road
+            const coordinates = route.geometry.coordinates.map(c => [c[1], c[0]]); // GeoJSON [lng, lat] ke Leaflet [lat, lng]
+            routeLine = L.polyline(coordinates, {
+                color: "blue",
+                weight: 5,
+                opacity: 0.8,
+            }).addTo(map);
+
+        } else {
+            throw new Error("No route found");
+        }
+    } catch (error) {
+        console.warn("OSRM Failed, falling back to Haversine straight line", error);
+        
+        // Fallback: Garis Lurus (Burung) + Perhitungan Rumus Matematika Klasik
+        distanceKm.value = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
+        routeLine = L.polyline(
+            [
+                [lat, lng],
+                [SCHOOL_LAT, SCHOOL_LNG],
+            ],
+            {
+                color: "gray",
+                dashArray: "5, 10",
+                weight: 3,
+            },
+        ).addTo(map);
+    }
+
+    // Update Harga secara Dinamis berdasarkan Rumus Linier (Reverse Engineering Tabel)
+    // Harga Paket Utama = 200.000 + (Jarak KM * 50.000)
+    let price = BASE_PRICE + (distanceKm.value * PRICE_PER_KM);
+    
+    // Harga Pulang/Pergi Saja = 52% dari Harga Paket
+    let oneWayPrice = price * 0.52;
+
+    // Bulatkan ke ribuan terdekat agar angkanya cantik/rapi seperti di tabel
+    estimatedPrice.value = Math.round(price / 1000) * 1000;
+    estimatedPriceOneWay.value = Math.round(oneWayPrice / 1000) * 1000;
 };
 
 // Fungsi Pencarian Alamat ke Nominatim OSM (GRATIS)
@@ -205,13 +242,22 @@ const formatRupiah = (angka) => {
 
                         <div v-if="distanceKm > 0">
                             <p
-                                class="text-4xl font-extrabold text-blue-600 my-4"
+                                class="text-3xl font-extrabold text-blue-600 my-4"
                             >
+                                <span class="text-sm text-gray-500 font-normal block mb-1">Paket Antar Jemput (PP):</span>
                                 {{ formatRupiah(estimatedPrice) }}
                             </p>
-                            <div class="text-sm text-gray-600 space-y-1">
+                            
+                            <p
+                                class="text-xl font-bold text-orange-500 mb-6 pb-4 border-b border-gray-200"
+                            >
+                                <span class="text-sm text-gray-500 font-normal block mb-1">Paket 1 Arah (Pergi/Pulang Saja):</span>
+                                {{ formatRupiah(estimatedPriceOneWay) }}
+                            </p>
+
+                            <div class="text-sm text-gray-600 space-y-1 mb-4">
                                 <p>
-                                    Jarak ke sekolah:
+                                    Jarak Rute Aspal:
                                     <b>{{ distanceKm.toFixed(2) }} KM</b>
                                 </p>
                                 <p>

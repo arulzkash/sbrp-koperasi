@@ -10,10 +10,10 @@ const props = defineProps({
 });
 
 // Koordinat Sekolah
-const SCHOOL_LAT = -6.815348;
-const SCHOOL_LNG = 107.616659;
-const BASE_PRICE = 100000;
-const PRICE_PER_KM = 2500;
+const SCHOOL_LAT = -6.826864390637824;
+const SCHOOL_LNG = 107.63886429303408;
+const BASE_PRICE = 200000;
+const PRICE_PER_KM = 50000;
 
 // Setup Form Inertia bawaan dengan data dari database
 const form = useForm({
@@ -22,6 +22,7 @@ const form = useForm({
     longitude: props.student.longitude,
     distance: props.student.distance_to_school_meters / 1000,
     price: props.student.price_per_month,
+    one_way_price: Math.round((props.student.price_per_month * 0.52) / 1000) * 1000,
 });
 
 let map = null;
@@ -37,7 +38,7 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
     return R * c;
 };
 
-const updateMapAndData = (lat, lng) => {
+const updateMapAndData = async (lat, lng) => {
     form.latitude = lat;
     form.longitude = lng;
 
@@ -45,13 +46,47 @@ const updateMapAndData = (lat, lng) => {
         userMarker.setLatLng([lat, lng]);
     }
 
-    form.distance = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
-    form.price = Math.round(BASE_PRICE + form.distance * PRICE_PER_KM * 30);
-
     if (routeLine) map.removeLayer(routeLine);
-    routeLine = L.polyline([[lat, lng], [SCHOOL_LAT, SCHOOL_LNG]], {
-        color: 'blue', dashArray: '5, 10', weight: 2
-    }).addTo(map);
+
+    try {
+        // Panggil API OSRM untuk Jarak Jalan Raya & Rute Asli
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${SCHOOL_LNG},${SCHOOL_LAT}?overview=full&geometries=geojson`;
+        const response = await fetch(osrmUrl);
+        const data = await response.json();
+
+        if (data && data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            
+            // Jarak Asli Jalan Raya (dari Meter ke KM)
+            form.distance = route.distance / 1000;
+            
+            // Gambar Garis OSRM di Peta
+            const coordinates = route.geometry.coordinates.map(c => [c[1], c[0]]);
+            routeLine = L.polyline(coordinates, {
+                color: "blue", weight: 5, opacity: 0.8
+            }).addTo(map);
+        } else {
+            throw new Error("Rute OSRM tidak ditemukan");
+        }
+    } catch (error) {
+        console.warn("OSRM gagal, menggunakan garis lurus (Haversine)", error);
+        
+        // Fallback: Matematika Jarak Lurus jika API error
+        form.distance = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
+        routeLine = L.polyline([[lat, lng], [SCHOOL_LAT, SCHOOL_LNG]], {
+            color: 'gray', dashArray: '5, 10', weight: 3
+        }).addTo(map);
+    }
+    
+    // Hitung Harga Paket Utama (Sesuai Tabel 200k + 50k/km)
+    let price = BASE_PRICE + (form.distance * PRICE_PER_KM);
+    
+    // Hitung Harga Paket Pulang/Pergi Saja
+    let oneWayPrice = price * 0.52;
+
+    // Bulatkan agar rasi ribuan pas
+    form.price = Math.round(price / 1000) * 1000;
+    form.one_way_price = Math.round(oneWayPrice / 1000) * 1000;
 };
 
 onMounted(() => {
@@ -126,8 +161,17 @@ const formatRupiah = (angka) => {
                         </div>
 
                         <div class="bg-gray-100 p-4 rounded border mt-auto">
-                            <p class="text-sm text-gray-500">Estimasi Jarak: <b class="text-gray-800">{{ form.distance.toFixed(2) }} KM</b></p>
-                            <p class="text-sm text-gray-500 mb-2">Tarif Baru: <b class="text-red-600">{{ formatRupiah(form.price) }}</b></p>
+                            <p class="text-sm text-gray-500 mb-2">Estimasi Jarak Rute Udara: <b class="text-gray-800">{{ form.distance.toFixed(2) }} KM</b></p>
+                            
+                            <div class="mb-3 bg-white p-2 rounded border border-gray-200">
+                                <p class="text-xs text-gray-500 mb-1">Tarif Baru Paket Antar-Jemput (PP):</p>
+                                <b class="text-blue-600 text-lg block">{{ formatRupiah(form.price) }}</b>
+                            </div>
+                            
+                            <div class="mb-4 bg-white p-2 rounded border border-gray-200">
+                                <p class="text-xs text-gray-500 mb-1">Tarif Baru Paket 1 Arah (Pergi / Pulang Saja):</p>
+                                <b class="text-orange-500 text-base block">{{ formatRupiah(form.one_way_price) }}</b>
+                            </div>
                             
                             <button 
                                 type="submit" 
