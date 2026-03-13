@@ -46,13 +46,8 @@ class RouteOptimizerService
 
         if ($fleets->isEmpty() || $students->isEmpty()) return;
 
-        $clusters = $this->clusterByKMeans(
-            $students->values()->all(),
-            $fleets->count()
-        );
-
-        // balancing
-        $fleetStudents = $this->balanceClusterCapacity($clusters, $fleets);
+        // SWEEP ALGORITHM
+        $fleetStudents = $this->clusterBySweepAndCapacity($students, $fleets);
 
         foreach ($fleetStudents as $fleetId => $studentsForFleet) {
 
@@ -60,14 +55,14 @@ class RouteOptimizerService
 
             $fleet = $fleets->firstWhere('id', $fleetId);
 
-            $route = $this->nearestNeighborFromBase(
-                $studentsForFleet,
-                $fleet
-            );
+            // Morning: start from furthest, go towards school
+            $route = $this->sortRouteByDistance($studentsForFleet, 'desc');
 
             $route = $this->twoOptImprove($route);
 
             foreach ($route as $order => $student) {
+                unset($student->sweep_angle);
+                unset($student->school_distance);
 
                 $student->update([
                     'morning_fleet_id' => $fleet->id,
@@ -97,12 +92,8 @@ class RouteOptimizerService
 
         foreach ($groupedBySession as $session => $students) {
 
-            $clusters = $this->clusterByKMeans(
-                $students->values()->all(),
-                $fleets->count()
-            );
-
-            $fleetStudents = $this->balanceClusterCapacity($clusters, $fleets);
+            // SWEEP ALGORITHM (per session)
+            $fleetStudents = $this->clusterBySweepAndCapacity($students, $fleets);
 
             foreach ($fleetStudents as $fleetId => $studentsForFleet) {
 
@@ -110,11 +101,15 @@ class RouteOptimizerService
 
                 $fleet = $fleets->firstWhere('id', $fleetId);
 
-                $route = $this->nearestNeighborRoute($studentsForFleet);
+                // Afternoon: start from school, go to closest first
+                $route = $this->sortRouteByDistance($studentsForFleet, 'asc');
 
                 $route = $this->twoOptImprove($route);
 
                 foreach ($route as $order => $student) {
+                    unset($student->sweep_angle);
+                    unset($student->school_distance);
+
                     $student->update([
                         'afternoon_fleet_id' => $fleet->id,
                         'afternoon_route_order' => $order + 1
@@ -126,120 +121,72 @@ class RouteOptimizerService
 
     /*
     |--------------------------------------------------------------------------
-    | K-MEANS CLUSTERING
+    | SWEEP CLUSTERING (ANGULAR SORT)
     |--------------------------------------------------------------------------
     */
 
-    private function clusterByKMeans($students, $k)
+    private function clusterBySweepAndCapacity($students, $fleets)
     {
-        $studentCount = count($students);
-
-        if ($studentCount == 0) {
-            return [];
-        }
-
-        // cluster tidak boleh lebih besar dari jumlah siswa
-        $k = min($k, $studentCount);
-
-        $centroids = [];
-
-        shuffle($students);
-
-        for ($i = 0; $i < $k; $i++) {
-            $centroids[$i] = [
-                'lat' => $students[$i]->latitude,
-                'lng' => $students[$i]->longitude
-            ];
-        }
-
-        for ($iteration = 0; $iteration < 10; $iteration++) {
-
-            $clusters = array_fill(0, $k, []);
-
-            foreach ($students as $student) {
-
-                $bestCluster = 0;
-                $minDistance = PHP_INT_MAX;
-
-                foreach ($centroids as $index => $centroid) {
-
-                    $distance = $this->calculateDistance(
-                        $student->latitude,
-                        $student->longitude,
-                        $centroid['lat'],
-                        $centroid['lng']
-                    );
-
-                    if ($distance < $minDistance) {
-
-                        $minDistance = $distance;
-                        $bestCluster = $index;
-                    }
-                }
-
-                $clusters[$bestCluster][] = $student;
+        // 1. Calculate angle from school for each student
+        $studentsWithAngles = [];
+        foreach ($students as $student) {
+            $dy = $student->latitude - self::SCHOOL_LAT;
+            $dx = $student->longitude - self::SCHOOL_LNG;
+            // atan2 returns -PI to PI. Convert to 0 to 360 degrees.
+            $angle = atan2($dy, $dx) * 180 / M_PI;
+            if ($angle < 0) {
+                $angle += 360;
             }
-
-            foreach ($clusters as $index => $cluster) {
-
-                if (empty($cluster)) continue;
-
-                $latSum = 0;
-                $lngSum = 0;
-
-                foreach ($cluster as $student) {
-
-                    $latSum += $student->latitude;
-                    $lngSum += $student->longitude;
-                }
-
-                $centroids[$index] = [
-                    'lat' => $latSum / count($cluster),
-                    'lng' => $lngSum / count($cluster)
-                ];
-            }
+            $student->sweep_angle = $angle;
+            $studentsWithAngles[] = $student;
         }
 
-        return $clusters;
-    }
+        // 2. Sort students by angle (Sweep)
+        usort($studentsWithAngles, function ($a, $b) {
+            return $a->sweep_angle <=> $b->sweep_angle;
+        });
 
-    private function balanceClusterCapacity($clusters, $fleets)
-    {
+        // 3. Fairly distribute capacity
+        // To prevent one fleet having 12 and another 1, we determine a "fair share".
+        $totalStudents = count($studentsWithAngles);
+        $totalFleets = count($fleets);
+        $baseShare = floor($totalStudents / $totalFleets);
+        $remainder = $totalStudents % $totalFleets;
+
         $fleetStudents = [];
+        $studentIndex = 0;
 
-        foreach ($fleets as $fleet) {
+        foreach ($fleets as $index => $fleet) {
             $fleetStudents[$fleet->id] = [];
+            
+            // This fleet's quota for this pass
+            $quota = $baseShare + ($index < $remainder ? 1 : 0);
+            
+            // Respect max capacity
+            $quota = min($quota, $fleet->capacity);
+
+            // Assign students in the current sweep "slice"
+            for ($i = 0; $i < $quota && $studentIndex < $totalStudents; $i++) {
+                $fleetStudents[$fleet->id][] = $studentsWithAngles[$studentIndex];
+                $studentIndex++;
+            }
         }
 
-        foreach ($clusters as $cluster) {
-
-            foreach ($cluster as $student) {
-
-                $bestFleet = null;
-                $bestDistance = PHP_INT_MAX;
-
-                foreach ($fleets as $fleet) {
-
-                    if (count($fleetStudents[$fleet->id]) >= $fleet->capacity) {
-                        continue;
-                    }
-
-                    $distance = $this->calculateDistance(
-                        $student->latitude,
-                        $student->longitude,
-                        $fleet->base_latitude,
-                        $fleet->base_longitude
-                    );
-
-                    if ($distance < $bestDistance) {
-                        $bestDistance = $distance;
-                        $bestFleet = $fleet;
-                    }
+        // If there are leftover students (because some fleets maxed out capacity but others were empty initially)
+        // just greedily assign them to any fleet with remaining capacity.
+        while ($studentIndex < $totalStudents) {
+            $assigned = false;
+            foreach ($fleets as $fleet) {
+                if (count($fleetStudents[$fleet->id]) < $fleet->capacity) {
+                    $fleetStudents[$fleet->id][] = $studentsWithAngles[$studentIndex];
+                    $studentIndex++;
+                    $assigned = true;
+                    break;
                 }
-
-                if ($bestFleet) {
-                    $fleetStudents[$bestFleet->id][] = $student;
-                }
+            }
+            // If all fleets are 100% full, the remaining students simply cannot be routed.
+            if (!$assigned) {
+                break;
             }
         }
 
@@ -252,86 +199,27 @@ class RouteOptimizerService
     |--------------------------------------------------------------------------
     */
 
-    private function nearestNeighborRoute($students)
+    private function sortRouteByDistance($students, $direction = 'asc')
     {
-        $route = [];
-
-        $currentLat = self::SCHOOL_LAT;
-        $currentLng = self::SCHOOL_LNG;
-
-        while (count($students) > 0) {
-
-            $nearest = null;
-            $nearestKey = null;
-            $minDistance = PHP_INT_MAX;
-
-            foreach ($students as $key => $student) {
-
-                $distance = $this->calculateDistance(
-                    $currentLat,
-                    $currentLng,
-                    $student->latitude,
-                    $student->longitude
-                );
-
-                if ($distance < $minDistance) {
-
-                    $minDistance = $distance;
-                    $nearest = $student;
-                    $nearestKey = $key;
-                }
-            }
-
-            $route[] = $nearest;
-
-            $currentLat = $nearest->latitude;
-            $currentLng = $nearest->longitude;
-
-            unset($students[$nearestKey]);
+        $studentsWithDistance = [];
+        foreach ($students as $student) {
+            $student->school_distance = $this->calculateDistance(
+                self::SCHOOL_LAT,
+                self::SCHOOL_LNG,
+                $student->latitude,
+                $student->longitude
+            );
+            $studentsWithDistance[] = $student;
         }
 
-        return $route;
-    }
-
-    private function nearestNeighborFromBase($students, $fleet)
-    {
-        $route = [];
-
-        $currentLat = $fleet->base_latitude;
-        $currentLng = $fleet->base_longitude;
-
-        while (count($students) > 0) {
-
-            $nearest = null;
-            $nearestKey = null;
-            $minDistance = PHP_INT_MAX;
-
-            foreach ($students as $key => $student) {
-
-                $distance = $this->calculateDistance(
-                    $currentLat,
-                    $currentLng,
-                    $student->latitude,
-                    $student->longitude
-                );
-
-                if ($distance < $minDistance) {
-
-                    $minDistance = $distance;
-                    $nearest = $student;
-                    $nearestKey = $key;
-                }
+        usort($studentsWithDistance, function ($a, $b) use ($direction) {
+            if ($direction === 'asc') {
+                return $a->school_distance <=> $b->school_distance;
             }
+            return $b->school_distance <=> $a->school_distance;
+        });
 
-            $route[] = $nearest;
-
-            $currentLat = $nearest->latitude;
-            $currentLng = $nearest->longitude;
-
-            unset($students[$nearestKey]);
-        }
-
-        return $route;
+        return $studentsWithDistance;
     }
 
     /*
