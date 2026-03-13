@@ -161,7 +161,7 @@ const formatRupiah = (angka) => {
                         </div>
 
                         <div class="bg-gray-100 p-4 rounded border mt-auto">
-                            <p class="text-sm text-gray-500 mb-2">Estimasi Jarak Rute Udara: <b class="text-gray-800">{{ form.distance.toFixed(2) }} KM</b></p>
+                            <p class="text-sm text-gray-500 mb-2">Jarak Rute Aspal: <b class="text-gray-800">{{ form.distance.toFixed(2) }} KM</b></p>
                             
                             <div class="mb-3 bg-white p-2 rounded border border-gray-200">
                                 <p class="text-xs text-gray-500 mb-1">Tarif Baru Paket Antar-Jemput (PP):</p>

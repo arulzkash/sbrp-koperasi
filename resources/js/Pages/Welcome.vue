@@ -265,7 +265,7 @@ const formatRupiah = (angka) => {
                                 </p>
                                 <p>
                                     Tarif Jarak:
-                                    {{ formatRupiah(PRICE_PER_KM) }} / KM / Hari
+                                    {{ formatRupiah(PRICE_PER_KM) }} / KM
                                 </p>
                             </div>
 
