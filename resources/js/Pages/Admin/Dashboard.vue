@@ -372,8 +372,13 @@ const animateVehicle = (route) => {
         const dx = next[1] - current[1];
         const dy = next[0] - current[0];
 
+        // Hitung sudut berdasarkan koordinat (X = bujur (lng) diff, Y = lintang (lat) diff)
+        // atan2(dy, dx) mereturn arah standar (Timur = 0, Utara = 90)
+        // Icon mobil biasanya default-nya hadap atas (Utara).
+        // Jika aslinya tegak (+) dan mau dibikin rebahan (-), kita sesuaikan base anglenya (+90 atau -90 derajat)
         let angle = (Math.atan2(dy, dx) * 180) / Math.PI;
-        angle = angle + 90;
+        // Kurangi 90 supaya sejajar horizontal kalau default mobilnya vertikal
+        angle = angle - 90;
 
         marker.setRotationAngle(angle);
         marker.setLatLng(next);
