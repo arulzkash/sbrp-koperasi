@@ -12,16 +12,45 @@ defineProps({
 const SCHOOL_LAT = -6.826864390637824;
 const SCHOOL_LNG = 107.63886429303408;
 
+// =========================
+// STATE
+// =========================
 const userLat = ref(null);
 const userLng = ref(null);
-const distanceKm = ref(0);
-const estimatedPrice = ref(0);
-const estimatedPriceOneWay = ref(0);
 
-const BASE_PRICE = 200000;
-const PRICE_PER_KM = 50000;
+const distanceMeters = ref(0);   // dipakai untuk hitung harga
+const distanceKm = ref(0);       // dipakai untuk tampilan
+const durationMin = ref(0);
 
-// State untuk Pencarian Alamat
+const estimatedTripFare = ref(0);      // 1x perjalanan
+const estimatedPrice = ref(0);         // bulanan PP
+const estimatedPriceOneWay = ref(0);   // bulanan 1 arah
+
+const accessSurcharge = ref(0);
+
+const monthlyDistanceCharge = ref(0);
+const monthlyDurationCharge = ref(0);
+
+// =========================
+// KONFIGURASI PRICING
+// =========================
+const BASE_MONTHLY_PP = 250000;
+const RATE_MONTHLY_PER_MINUTE_PP = 1000;
+const ONE_WAY_RATIO = 0.52;
+
+const DISTANCE_BANDS = [
+    { upto: 1000, rate: 15 },      // 0 - 1 km
+    { upto: 2000, rate: 50 },      // 1 - 2 km
+    { upto: 4000, rate: 55 },      // 2 - 4 km
+    { upto: 10000, rate: 13 },     // 4 - 10 km
+    { upto: Infinity, rate: 8 },   // > 10 km
+];
+
+const FALLBACK_SPEED_KMH = 18;
+
+// =========================
+// STATE PENCARIAN
+// =========================
 const searchQuery = ref("");
 const isSearching = ref(false);
 
@@ -29,72 +58,145 @@ let map = null;
 let userMarker = null;
 let routeLine = null;
 
+// =========================
+// HELPERS
+// =========================
+
+const calculateDistanceCharge = (meters) => {
+    let total = 0;
+    let previousLimit = 0;
+
+    for (const band of DISTANCE_BANDS) {
+        const upperLimit = band.upto;
+
+        const bandMeters =
+            upperLimit === Infinity
+                ? Math.max(0, meters - previousLimit)
+                : Math.max(0, Math.min(meters, upperLimit) - previousLimit);
+
+        total += bandMeters * band.rate;
+        previousLimit = upperLimit;
+
+        if (meters <= upperLimit) break;
+    }
+
+    return total;
+};
+
+const ceilToStep = (value, step = 1000) => Math.ceil(value / step) * step;
+
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLon = ((lon2 - lon1) * Math.PI) / 180;
+
     const a =
         Math.sin(dLat / 2) * Math.sin(dLat / 2) +
         Math.cos((lat1 * Math.PI) / 180) *
             Math.cos((lat2 * Math.PI) / 180) *
             Math.sin(dLon / 2) *
             Math.sin(dLon / 2);
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
 };
 
-// Fungsi Utama untuk Update Titik, Jarak, dan Harga
+const calculatePricing = ({
+    distanceMeters,
+    durationMin,
+    accessSurcharge = 0,
+}) => {
+    const distanceCharge = calculateDistanceCharge(distanceMeters);
+    const durationCharge = durationMin * RATE_MONTHLY_PER_MINUTE_PP;
+
+    const monthlyPPRaw =
+        BASE_MONTHLY_PP +
+        distanceCharge +
+        durationCharge +
+        accessSurcharge;
+
+    const monthlyPP = Math.ceil(monthlyPPRaw / 1000) * 1000;
+    const monthlyOneWay = Math.ceil((monthlyPP * ONE_WAY_RATIO) / 1000) * 1000;
+
+    const estimatedTripFare = Math.ceil((monthlyOneWay / 22) / 500) * 500;
+
+    return {
+        monthlyPP,
+        monthlyOneWay,
+        estimatedTripFare,
+        distanceCharge,
+        durationCharge,
+    };
+};
+
+const applyPricing = () => {
+    const pricing = calculatePricing({
+        distanceMeters: distanceMeters.value,
+        durationMin: durationMin.value,
+        accessSurcharge: accessSurcharge.value,
+    });
+
+    estimatedTripFare.value = pricing.estimatedTripFare;
+    estimatedPriceOneWay.value = pricing.monthlyOneWay;
+    estimatedPrice.value = pricing.monthlyPP;
+    monthlyDistanceCharge.value = pricing.distanceCharge;
+    monthlyDurationCharge.value = pricing.durationCharge;
+};
+
+// =========================
+// UPDATE LOKASI + ROUTING + PRICING
+// =========================
 const updateLocation = async (lat, lng) => {
     userLat.value = lat;
     userLng.value = lng;
 
     if (!userMarker) {
-        // Bikin marker dengan fitur DRAGGABLE (Bisa digeser)
         userMarker = L.marker([lat, lng], { draggable: true })
             .addTo(map)
             .bindPopup("<b>Geser pin ini ke depan rumah Anda</b>")
             .openPopup();
 
-        // Event saat marker selesai digeser
-        userMarker.on("dragend", function (e) {
+        userMarker.on("dragend", function () {
             const position = userMarker.getLatLng();
             updateLocation(position.lat, position.lng);
-            map.panTo(position); // Peta ngikutin pin
+            map.panTo(position);
         });
     } else {
         userMarker.setLatLng([lat, lng]);
     }
 
-    if (routeLine) map.removeLayer(routeLine);
+    if (routeLine) {
+        map.removeLayer(routeLine);
+    }
 
     try {
-        // Menembak API OSRM Publik untuk mendapatkan Rute Jalan Raya Nyata
         const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${SCHOOL_LNG},${SCHOOL_LAT}?overview=full&geometries=geojson`;
         const response = await fetch(osrmUrl);
         const data = await response.json();
 
-        if (data && data.routes && data.routes.length > 0) {
+        if (data?.routes?.length > 0) {
             const route = data.routes[0];
-            
-            // Update Jarak (OSRM mengembalikan meter)
+
+            distanceMeters.value = route.distance;
             distanceKm.value = route.distance / 1000;
-            
-            // Gambar Garis Peta Real Road
-            const coordinates = route.geometry.coordinates.map(c => [c[1], c[0]]); // GeoJSON [lng, lat] ke Leaflet [lat, lng]
+            durationMin.value = route.duration / 60;
+
+            const coordinates = route.geometry.coordinates.map((c) => [c[1], c[0]]);
             routeLine = L.polyline(coordinates, {
                 color: "blue",
                 weight: 5,
                 opacity: 0.8,
             }).addTo(map);
-
         } else {
             throw new Error("No route found");
         }
     } catch (error) {
-        console.warn("OSRM Failed, falling back to Haversine straight line", error);
-        
-        // Fallback: Garis Lurus (Burung) + Perhitungan Rumus Matematika Klasik
+        console.warn("OSRM failed, fallback to straight line", error);
+
         distanceKm.value = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
+        distanceMeters.value = distanceKm.value * 1000;
+        durationMin.value = (distanceKm.value / FALLBACK_SPEED_KMH) * 60;
+
         routeLine = L.polyline(
             [
                 [lat, lng],
@@ -104,55 +206,54 @@ const updateLocation = async (lat, lng) => {
                 color: "gray",
                 dashArray: "5, 10",
                 weight: 3,
-            },
+            }
         ).addTo(map);
     }
 
-    // Update Harga secara Dinamis berdasarkan Rumus Linier (Reverse Engineering Tabel)
-    // Harga Paket Utama = 200.000 + (Jarak KM * 50.000)
-    let price = BASE_PRICE + (distanceKm.value * PRICE_PER_KM);
-    
-    // Harga Pulang/Pergi Saja = 52% dari Harga Paket
-    let oneWayPrice = price * 0.52;
-
-    // Bulatkan ke ribuan terdekat agar angkanya cantik/rapi seperti di tabel
-    estimatedPrice.value = Math.round(price / 1000) * 1000;
-    estimatedPriceOneWay.value = Math.round(oneWayPrice / 1000) * 1000;
+    applyPricing();
 };
 
-// Fungsi Pencarian Alamat ke Nominatim OSM (GRATIS)
+// =========================
+// SEARCH ADDRESS
+// =========================
 const searchAddress = async () => {
     if (!searchQuery.value) return;
 
     isSearching.value = true;
     try {
-        // Tembak API Nominatim (tambah Lembang biar pencarian fokus di area target)
         const response = await fetch(
-            `https://nominatim.openstreetmap.org/search?format=json&q=${searchQuery.value}, Lembang`,
+            `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+                `${searchQuery.value}, Lembang, Bandung Barat`
+            )}`
         );
+
         const data = await response.json();
 
         if (data && data.length > 0) {
             const lat = parseFloat(data[0].lat);
             const lng = parseFloat(data[0].lon);
 
-            // Update lokasi & suruh peta terbang ke sana
             updateLocation(lat, lng);
             map.flyTo([lat, lng], 16);
         } else {
             alert(
-                "Alamat tidak ditemukan. Coba ketik nama jalan raya yang lebih umum, lalu geser pin-nya manual ke dalam gang.",
+                "Alamat tidak ditemukan. Coba ketik nama jalan yang lebih umum, lalu geser pin manual ke lokasi rumah."
             );
         }
     } catch (error) {
         console.error("Error fetching address:", error);
+        alert("Gagal mencari alamat. Silakan coba lagi.");
     } finally {
         isSearching.value = false;
     }
 };
 
+// =========================
+// INIT MAP
+// =========================
 onMounted(() => {
     map = L.map("landing-map").setView([SCHOOL_LAT, SCHOOL_LNG], 13);
+
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: "© OpenStreetMap contributors",
     }).addTo(map);
@@ -241,32 +342,40 @@ const formatRupiah = (angka) => {
                         </h3>
 
                         <div v-if="distanceKm > 0">
-                            <p
-                                class="text-3xl font-extrabold text-blue-600 my-4"
-                            >
-                                <span class="text-sm text-gray-500 font-normal block mb-1">Paket Antar Jemput (PP):</span>
+                            <p class="text-3xl font-extrabold text-blue-600 my-4">
+                                <span class="text-sm text-gray-500 font-normal block mb-1">
+                                    Paket Antar Jemput (PP):
+                                </span>
                                 {{ formatRupiah(estimatedPrice) }}
                             </p>
-                            
-                            <p
-                                class="text-xl font-bold text-orange-500 mb-6 pb-4 border-b border-gray-200"
-                            >
-                                <span class="text-sm text-gray-500 font-normal block mb-1">Paket 1 Arah (Pergi/Pulang Saja):</span>
+
+                            <p class="text-xl font-bold text-orange-500 mb-4 pb-4 border-b border-gray-200">
+                                <span class="text-sm text-gray-500 font-normal block mb-1">
+                                    Paket 1 Arah (Pergi / Pulang Saja):
+                                </span>
                                 {{ formatRupiah(estimatedPriceOneWay) }}
                             </p>
 
+                            <div class="bg-white border rounded-lg p-4 text-left mb-4">
+                                <h4 class="font-semibold text-gray-700 mb-2">Ringkasan Estimasi</h4>
+
+                                <div class="text-sm text-gray-600 space-y-1">
+                                    <p>Jarak rute jalan: <b>{{ distanceKm.toFixed(2) }} KM</b></p>
+                                    <p>Durasi rute: <b>{{ Math.ceil(durationMin) }} menit</b></p>
+                                    <p>Estimasi 1x perjalanan: <b>{{ formatRupiah(estimatedTripFare) }}</b></p>
+                                </div>
+                            </div>
+
                             <div class="text-sm text-gray-600 space-y-1 mb-4">
-                                <p>
-                                    Jarak Rute Aspal:
-                                    <b>{{ distanceKm.toFixed(2) }} KM</b>
-                                </p>
-                                <p>
-                                    Tarif Dasar: {{ formatRupiah(BASE_PRICE) }}
-                                </p>
-                                <p>
-                                    Tarif Jarak:
-                                    {{ formatRupiah(PRICE_PER_KM) }} / KM
-                                </p>
+                                <p>Tarif dasar bulanan PP: {{ formatRupiah(BASE_MONTHLY_PP) }}</p>
+                                <p>Model tarif jarak: bertingkat berdasarkan jarak rute</p>
+                                <p>Tarif waktu bulanan: {{ formatRupiah(RATE_MONTHLY_PER_MINUTE_PP) }} / menit</p>
+                                <p>Rasio paket 1 arah: {{ Math.round(ONE_WAY_RATIO * 100) }}%</p>
+                            </div>
+
+                            <div class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
+                                Estimasi tarif dihitung otomatis berdasarkan titik jemput, jarak rute, dan durasi.
+                                Untuk area akses khusus, harga final dapat diverifikasi admin.
                             </div>
 
                             <hr class="my-4 border-gray-300" />
@@ -277,8 +386,12 @@ const formatRupiah = (angka) => {
                                     route('register', {
                                         lat: userLat,
                                         lng: userLng,
-                                        distance: distanceKm,
+                                        distance_km: distanceKm,
+                                        distance_meters: distanceMeters,
+                                        duration: durationMin,
                                         price: estimatedPrice,
+                                        price_one_way: estimatedPriceOneWay,
+                                        trip_fare: estimatedTripFare,
                                     })
                                 "
                                 class="block w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded transition duration-200"
