@@ -305,6 +305,14 @@ const initMap = () => {
 };
 
 const generateRoute = () => {
+    const confirmed = confirm(
+        "Apakah Anda yakin ingin generate ulang rute? Penugasan rute yang ada akan dihitung ulang.",
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
     isGenerating.value = true;
     router.post(
         "/admin/dashboard/generate",
