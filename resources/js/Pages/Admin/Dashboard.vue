@@ -307,7 +307,7 @@ const initMap = () => {
 const generateRoute = () => {
     isGenerating.value = true;
     router.post(
-        "/admin/test-dashboard/generate",
+        "/admin/dashboard/generate",
         {},
         {
             preserveScroll: true,
