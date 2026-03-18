@@ -40,20 +40,12 @@ const getServiceName = (type) => {
 
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold text-gray-700">Status Langganan Siswa</h3>
-                    
-                    <div v-if="children.length > 0">
-                        <Link 
-                            v-if="children[0].status !== 'active'" 
-                            :href="route('location.edit', children[0].id)"
-                            class="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded text-sm font-bold shadow transition"
-                        >
-                            ✏️ Update Titik Jemput
-                        </Link>
-                        <span v-else class="text-xs text-gray-500 italic bg-gray-100 px-3 py-2 rounded border">
-                            Rute terkunci. Hubungi admin untuk ubah lokasi.
-                        </span>
+
+                    <div v-if="children.length > 0" class="text-xs text-gray-500">
+                        Kelola lokasi per siswa pada kartu di bawah.
                     </div>
                 </div>
+
 
                 <div v-if="children.length === 0" class="bg-white p-8 text-center rounded-lg shadow-sm border border-gray-200">
                     <p class="text-gray-500 mb-4">Anda belum mendaftarkan lokasi jemputan anak.</p>
@@ -63,7 +55,7 @@ const getServiceName = (type) => {
                 <div v-else class="grid grid-cols-1 gap-6">
                     <div v-for="child in children" :key="child.id" class="bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
                         
-                        <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
+                        <div class="bg-gray-50 p-4 border-b flex justify-between items-start">
                             <div>
                                 <h4 class="font-bold text-lg text-gray-800">{{ child.name }}</h4>
                                 <p class="text-xs font-semibold text-gray-600 mt-1">
@@ -71,8 +63,25 @@ const getServiceName = (type) => {
                                     <span class="bg-gray-200 px-2 py-1 rounded text-gray-700 mr-2">Kelas: {{ child.class_room || '-' }}</span>
                                     <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded">{{ getServiceName(child.service_type) }}</span>
                                 </p>
+
+                                <div class="mt-3">
+                                    <Link
+                                        v-if="child.status !== 'active'"
+                                        :href="route('location.edit', child.id)"
+                                        class="inline-flex items-center rounded-md bg-yellow-500 px-3 py-2 text-xs font-bold text-white shadow transition hover:bg-yellow-600"
+                                    >
+                                        ✏️ Update Titik Jemput
+                                    </Link>
+
+                                    <span
+                                        v-else
+                                        class="inline-flex items-center rounded-md border border-gray-200 bg-gray-100 px-3 py-2 text-xs italic text-gray-500"
+                                    >
+                                        Rute terkunci. Hubungi admin untuk ubah lokasi.
+                                    </span>
+                                </div>
                             </div>
-                            
+
                             <span v-if="child.payment_status === 'unpaid'" class="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold border border-red-200">
                                 BELUM BAYAR
                             </span>
@@ -80,6 +89,7 @@ const getServiceName = (type) => {
                                 LUNAS
                             </span>
                         </div>
+
 
                         <div class="p-4">
                             <div class="mb-4 bg-gray-50 p-3 rounded border border-gray-100 flex justify-between items-center">
@@ -95,10 +105,35 @@ const getServiceName = (type) => {
                             </div>
 
                             <div class="mb-4">
-                                <p class="text-sm text-gray-500 mb-1">Status Operasional:</p>
+                                <p class="text-sm text-gray-500 mb-1">Status Layanan:</p>
                                 <div class="flex items-center gap-2">
-                                    <span v-if="child.status === 'registered'" class="text-yellow-600 font-bold text-sm">⏳ Menunggu Penentuan Rute (Admin)</span>
-                                    <span v-else-if="child.status === 'active'" class="text-green-600 font-bold text-sm">✅ Aktif Dijemput</span>
+                                    <span
+                                        v-if="child.payment_status === 'unpaid'"
+                                        class="text-red-600 font-bold text-sm"
+                                    >
+                                        ⛔ Menunggu Verifikasi Pembayaran
+                                    </span>
+
+                                    <span
+                                        v-else-if="child.status === 'registered'"
+                                        class="text-yellow-600 font-bold text-sm"
+                                    >
+                                        ⏳ Lunas, menunggu generate rute admin
+                                    </span>
+
+                                    <span
+                                        v-else-if="child.status === 'active'"
+                                        class="text-green-600 font-bold text-sm"
+                                    >
+                                        ✅ Armada sudah aktif
+                                    </span>
+
+                                    <span
+                                        v-else
+                                        class="text-gray-500 font-bold text-sm"
+                                    >
+                                        • Status belum tersedia
+                                    </span>
                                 </div>
                             </div>
 

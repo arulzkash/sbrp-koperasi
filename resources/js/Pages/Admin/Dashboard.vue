@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from "vue";
-import { router } from "@inertiajs/vue3";
+import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout.vue";
+import { Head, router } from "@inertiajs/vue3";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "leaflet-rotatedmarker";
@@ -60,6 +61,56 @@ const filteredStudents = computed(() => {
             )
             .sort((a, b) => a.afternoon_route_order - b.afternoon_route_order);
     }
+});
+
+const routeReadyStudents = computed(() => {
+    if (viewMode.value === "morning") {
+        return props.students.filter((student) => {
+            return (
+                student.payment_status === "paid" &&
+                ["full", "pickup_only"].includes(student.service_type)
+            );
+        });
+    }
+
+    return props.students.filter((student) => {
+        return (
+            student.payment_status === "paid" &&
+            ["full", "dropoff_only"].includes(student.service_type) &&
+            student.session_out === selectedSession.value
+        );
+    });
+});
+
+const routeReadyStudentsCount = computed(() => {
+    return routeReadyStudents.value.length;
+});
+
+const routedStudentsCount = computed(() => {
+    return routeReadyStudents.value.filter((student) => {
+        return viewMode.value === "morning"
+            ? student.morning_fleet_id !== null
+            : student.afternoon_fleet_id !== null;
+    }).length;
+});
+
+const unroutedStudentsCount = computed(() => {
+    return Math.max(
+        routeReadyStudentsCount.value - routedStudentsCount.value,
+        0,
+    );
+});
+
+const hasRouteReadyStudents = computed(() => {
+    return routeReadyStudentsCount.value > 0;
+});
+
+const hasRoutedStudents = computed(() => {
+    return routedStudentsCount.value > 0;
+});
+
+const activeFleetsCount = computed(() => {
+    return sidebarData.value.length;
 });
 
 // 2. KELOMPOKKAN KE DALAM ARMADA (Untuk Sidebar & Pembuatan Garis Peta)
@@ -138,7 +189,7 @@ const renderMap = () => {
                         </div>`,
                         className: "",
                         iconSize: hasActive ? [16, 16] : [10, 10],
-                        iconAnchor: hasActive ? [8, 8] : [5, 5]
+                        iconAnchor: hasActive ? [8, 8] : [5, 5],
                     }),
                 })
                     .addTo(markersLayer)
@@ -193,9 +244,10 @@ const renderMap = () => {
             const marker = L.marker(coord, {
                 icon: L.divIcon({
                     html: iconHtml,
-                    className: "transition-all duration-300 hover:scale-125 hover:z-50",
+                    className:
+                        "transition-all duration-300 hover:scale-125 hover:z-50",
                     iconSize: hasActive ? [26, 26] : [12, 12],
-                    iconAnchor: hasActive ? [13, 13] : [6, 6]
+                    iconAnchor: hasActive ? [13, 13] : [6, 6],
                 }),
             });
 
@@ -255,7 +307,7 @@ const initMap = () => {
 const generateRoute = () => {
     isGenerating.value = true;
     router.post(
-        "/admin/test-route/generate",
+        "/admin/test-dashboard/generate",
         {},
         {
             preserveScroll: true,
@@ -435,207 +487,293 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="p-6 max-w-7xl mx-auto">
-        <h1 class="text-2xl font-bold mb-4">
-            Ruang Kendali Operasional Armada
-        </h1>
+    <Head title="Monitoring Armada" />
 
-        <div
-            class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded flex flex-col md:flex-row items-center justify-between gap-4"
-        >
-            <!-- LEFT SIDE -->
-            <div class="flex flex-wrap items-center gap-4">
-                <div class="flex flex-col">
-                    <label
-                        class="text-xs font-bold text-gray-500 mb-1 uppercase"
-                        >Mode Rute</label
-                    >
-                    <select
-                        v-model="viewMode"
-                        class="border-gray-300 rounded-md shadow-sm font-semibold"
-                    >
-                        <option value="morning">
-                            ☀️ Rute Pagi (Ke Sekolah)
-                        </option>
-                        <option value="afternoon">
-                            🌙 Rute Siang/Sore (Pulang)
-                        </option>
-                    </select>
+    <AuthenticatedLayout>
+        <template #header>
+            <h2 class="font-semibold text-xl text-gray-800 leading-tight">
+                Ruang Kendali Operasional Armada
+            </h2>
+        </template>
+
+        <div class="p-6 max-w-7xl mx-auto">
+            <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+                <div class="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                    <p class="text-xs font-bold uppercase text-blue-700">
+                        Siswa Siap Dirutekan
+                    </p>
+                    <p class="mt-1 text-2xl font-bold text-blue-900">
+                        {{ routeReadyStudentsCount }}
+                    </p>
+                    <p class="mt-1 text-[11px] text-blue-700">
+                        Sudah lunas dan sesuai filter aktif
+                    </p>
                 </div>
 
-                <div class="flex flex-col" v-if="viewMode === 'afternoon'">
-                    <label
-                        class="text-xs font-bold text-gray-500 mb-1 uppercase"
-                        >Sesi Jam Pulang</label
-                    >
-                    <select
-                        v-model="selectedSession"
-                        class="border-gray-300 rounded-md shadow-sm font-semibold"
-                    >
-                        <option value="13:00:00">Sesi 1 (13:00 WIB)</option>
-                        <option value="13:30:00">Sesi 2 (13:30 WIB)</option>
-                        <option value="14:30:00">Sesi 3 (14:30 WIB)</option>
-                        <option value="15:30:00">Sesi 4 (15:30 WIB)</option>
-                        <option value="15:45:00">Sesi 5 (15:45 WIB)</option>
-                    </select>
+                <div class="rounded-lg border border-green-200 bg-green-50 p-4">
+                    <p class="text-xs font-bold uppercase text-green-700">
+                        Sudah Terpetakan
+                    </p>
+                    <p class="mt-1 text-2xl font-bold text-green-900">
+                        {{ routedStudentsCount }}
+                    </p>
                 </div>
-            </div>
 
-            <!-- RIGHT SIDE BUTTON GROUP -->
-            <div class="flex items-center gap-3">
-                <button
-                    v-if="activeFleetId"
-                    @click="startAnimation"
-                    class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
-                >
-                    ▶ Simulasi Armada
-                </button>
+                <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+                    <p class="text-xs font-bold uppercase text-amber-700">
+                        Belum Masuk Rute
+                    </p>
+                    <p class="mt-1 text-2xl font-bold text-amber-900">
+                        {{ unroutedStudentsCount }}
+                    </p>
+                </div>
 
-                <button
-                    @click="generateRoute"
-                    :disabled="isGenerating"
-                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
-                >
-                    <span v-if="!isGenerating">🚀 Generate Rute Baru</span>
-                    <span v-else>Menghitung Algoritma...</span>
-                </button>
-            </div>
-        </div>
-
-        <div class="flex gap-6">
-            <div class="w-2/3">
-                <div
-                    id="map"
-                    class="h-[600px] rounded shadow z-0 border border-gray-300"
-                ></div>
+                <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p class="text-xs font-bold uppercase text-slate-700">
+                        Armada Aktif Di Tampilan
+                    </p>
+                    <p class="mt-1 text-2xl font-bold text-slate-900">
+                        {{ activeFleetsCount }}
+                    </p>
+                </div>
             </div>
 
             <div
-                class="w-1/3 bg-white p-4 rounded shadow border border-gray-200 max-h-[600px] overflow-y-auto pr-1"
+                class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded flex flex-col md:flex-row items-center justify-between gap-4"
             >
-                <!-- HEADER -->
-                <h2 class="font-semibold text-gray-800 text-lg mb-1">
-                    Penugasan Armada
-                </h2>
+                <!-- LEFT SIDE -->
+                <div class="flex flex-wrap items-center gap-4">
+                    <div class="flex flex-col">
+                        <label
+                            class="text-xs font-bold text-gray-500 mb-1 uppercase"
+                            >Mode Rute</label
+                        >
+                        <select
+                            v-model="viewMode"
+                            class="border-gray-300 rounded-md shadow-sm font-semibold"
+                        >
+                            <option value="morning">
+                                ☀️ Rute Pagi (Ke Sekolah)
+                            </option>
+                            <option value="afternoon">
+                                🌙 Rute Siang/Sore (Pulang)
+                            </option>
+                        </select>
+                    </div>
 
-                <p class="text-xs text-gray-400 mb-4 pb-3 border-b">
-                    <span v-if="viewMode === 'morning'">
-                        Menampilkan rute jemputan pagi (serentak).
-                    </span>
-
-                    <span v-else>
-                        Menampilkan rute pulang untuk sesi
-                        {{ selectedSession.substring(0, 5) }}.
-                    </span>
-                </p>
-
-                <!-- EMPTY STATE -->
-                <div
-                    v-if="sidebarData.length === 0"
-                    class="text-center text-gray-400 py-8 italic"
-                >
-                    Belum ada armada yang ditugaskan untuk sesi ini.
+                    <div class="flex flex-col" v-if="viewMode === 'afternoon'">
+                        <label
+                            class="text-xs font-bold text-gray-500 mb-1 uppercase"
+                            >Sesi Jam Pulang</label
+                        >
+                        <select
+                            v-model="selectedSession"
+                            class="border-gray-300 rounded-md shadow-sm font-semibold"
+                        >
+                            <option value="13:00:00">Sesi 1 (13:00 WIB)</option>
+                            <option value="13:30:00">Sesi 2 (13:30 WIB)</option>
+                            <option value="14:30:00">Sesi 3 (14:30 WIB)</option>
+                            <option value="15:30:00">Sesi 4 (15:30 WIB)</option>
+                            <option value="15:45:00">Sesi 5 (15:45 WIB)</option>
+                        </select>
+                    </div>
                 </div>
 
-                <!-- FLEET CARD -->
-                <div
-                    v-for="(fleet, index) in sidebarData"
-                    :key="fleet.id"
-                    @click="focusFleet(fleet.id)"
-                    class="mb-4 cursor-pointer rounded-lg border p-3 transition-all duration-200"
-                    :class="{
-                        'bg-yellow-50 border-yellow-300 shadow-sm':
-                            activeFleetId === fleet.id,
+                <!-- RIGHT SIDE BUTTON GROUP -->
+                <div class="flex flex-col items-end gap-2">
+                    <div class="flex items-center gap-3">
+                        <button
+                            v-if="activeFleetId"
+                            @click="startAnimation"
+                            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
+                        >
+                            ▶ Simulasi Armada
+                        </button>
 
-                        'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm':
-                            activeFleetId !== fleet.id,
-                    }"
+                        <button
+                            @click="generateRoute"
+                            :disabled="isGenerating"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
+                        >
+                            <span v-if="!isGenerating"
+                                >🚀 Generate Rute Baru</span
+                            >
+                            <span v-else>Menghitung Algoritma...</span>
+                        </button>
+                    </div>
+
+                    <p
+                        class="text-[11px] text-right text-blue-700 max-w-xs leading-4"
+                    >
+                        Generate memproses siswa yang sudah lunas dan sesuai
+                        mode layanan serta sesi pulang.
+                    </p>
+                </div>
+            </div>
+
+            <div class="flex gap-6">
+                <div class="w-2/3">
+                    <div
+                        id="map"
+                        class="h-[600px] rounded shadow z-0 border border-gray-300"
+                    ></div>
+                </div>
+
+                <div
+                    class="w-1/3 bg-white p-4 rounded shadow border border-gray-200 max-h-[600px] overflow-y-auto pr-1"
                 >
                     <!-- HEADER -->
-                    <div class="flex items-center justify-between mb-2">
-                        <div class="flex items-center gap-2">
-                            <span
-                                class="w-3 h-3 rounded-full"
-                                :style="{
-                                    backgroundColor:
-                                        colors[index % colors.length],
-                                }"
-                            ></span>
+                    <h2 class="font-semibold text-gray-800 text-lg mb-1">
+                        Penugasan Armada
+                    </h2>
 
-                            <h3 class="font-semibold text-gray-800">
-                                🚗 {{ fleet.name }}
-                            </h3>
-                        </div>
-
-                        <span class="text-xs text-gray-400 font-medium">
-                            {{ fleet.assigned_students.length }}/{{
-                                fleet.capacity
-                            }}
-                        </span>
-                    </div>
-
-                    <!-- CAPACITY BAR -->
-                    <div class="ml-5 mb-3">
-                        <div class="text-xs text-gray-500 mb-1">
-                            Kapasitas Terpakai
-                        </div>
-
-                        <div
-                            class="w-full bg-gray-100 rounded h-2 overflow-hidden"
-                        >
-                            <div
-                                class="h-2 rounded transition-all"
-                                :style="{
-                                    width:
-                                        (fleet.assigned_students.length /
-                                            fleet.capacity) *
-                                            100 +
-                                        '%',
-                                    backgroundColor:
-                                        colors[index % colors.length],
-                                }"
-                            ></div>
-                        </div>
-                    </div>
-
-                    <!-- STUDENT LIST -->
-                    <ul
-                        class="list-none pl-6 text-sm space-y-1 relative border-l-2 border-gray-100 ml-2"
+                    <p
+                        class="text-xs text-gray-500 mb-4 pb-3 border-b leading-5"
                     >
-                        <li
-                            v-for="student in fleet.assigned_students"
-                            :key="student.id"
-                            class="relative pl-4 py-1 rounded"
+                        <span v-if="viewMode === 'morning'">
+                            Menampilkan siswa siap dirutekan untuk rute pagi:
+                            layanan PP dan berangkat saja.
+                        </span>
+
+                        <span v-else>
+                            Menampilkan siswa siap dirutekan untuk rute pulang
+                            sesi
+                            {{ selectedSession.substring(0, 5) }}: layanan PP
+                            dan pulang saja.
+                        </span>
+                    </p>
+
+                    <!-- EMPTY STATE -->
+                    <div
+                        v-if="sidebarData.length === 0"
+                        class="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center"
+                    >
+                        <p class="text-sm font-semibold text-gray-700">
+                            Belum ada armada yang tampil pada filter ini.
+                        </p>
+
+                        <p
+                            v-if="!hasRouteReadyStudents"
+                            class="mt-2 text-xs text-gray-500"
                         >
-                            <!-- NUMBER -->
-                            <span
-                                class="absolute -left-[10px] top-1 bg-white border-2 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold shadow-sm"
-                                :style="{
-                                    borderColor: colors[index % colors.length],
-                                    color: colors[index % colors.length],
-                                }"
-                            >
-                                {{
-                                    viewMode === "morning"
-                                        ? student.morning_route_order
-                                        : student.afternoon_route_order
+                            Tidak ada siswa siap dirutekan pada mode atau sesi
+                            yang sedang dipilih.
+                        </p>
+
+                        <p
+                            v-else-if="!hasRoutedStudents"
+                            class="mt-2 text-xs text-gray-500"
+                        >
+                            Ada siswa siap dirutekan, tetapi rute belum
+                            digenerate atau belum tersimpan.
+                        </p>
+
+                        <p v-else class="mt-2 text-xs text-gray-500">
+                            Coba ubah mode, sesi, atau generate ulang rute.
+                        </p>
+                    </div>
+
+                    <!-- FLEET CARD -->
+                    <div
+                        v-for="(fleet, index) in sidebarData"
+                        :key="fleet.id"
+                        @click="focusFleet(fleet.id)"
+                        class="mb-4 cursor-pointer rounded-lg border p-3 transition-all duration-200"
+                        :class="{
+                            'bg-yellow-50 border-yellow-300 shadow-sm':
+                                activeFleetId === fleet.id,
+
+                            'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm':
+                                activeFleetId !== fleet.id,
+                        }"
+                    >
+                        <!-- HEADER -->
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2">
+                                <span
+                                    class="w-3 h-3 rounded-full"
+                                    :style="{
+                                        backgroundColor:
+                                            colors[index % colors.length],
+                                    }"
+                                ></span>
+
+                                <h3 class="font-semibold text-gray-800">
+                                    🚗 {{ fleet.name }}
+                                </h3>
+                            </div>
+
+                            <span class="text-xs text-gray-400 font-medium">
+                                {{ fleet.assigned_students.length }}/{{
+                                    fleet.capacity
                                 }}
                             </span>
+                        </div>
 
-                            <!-- NAME -->
-                            <p class="font-medium text-gray-700">
-                                {{ student.name }}
-                            </p>
+                        <!-- CAPACITY BAR -->
+                        <div class="ml-5 mb-3">
+                            <div class="text-xs text-gray-500 mb-1">
+                                Kapasitas Terpakai
+                            </div>
 
-                            <!-- META -->
-                            <p class="text-xs text-gray-500">
-                                Kls: {{ student.class_room || "-" }} | Sesi:
-                                {{ student.session_out.substring(0, 5) }}
-                            </p>
-                        </li>
-                    </ul>
+                            <div
+                                class="w-full bg-gray-100 rounded h-2 overflow-hidden"
+                            >
+                                <div
+                                    class="h-2 rounded transition-all"
+                                    :style="{
+                                        width:
+                                            (fleet.assigned_students.length /
+                                                fleet.capacity) *
+                                                100 +
+                                            '%',
+                                        backgroundColor:
+                                            colors[index % colors.length],
+                                    }"
+                                ></div>
+                            </div>
+                        </div>
+
+                        <!-- STUDENT LIST -->
+                        <ul
+                            class="list-none pl-6 text-sm space-y-1 relative border-l-2 border-gray-100 ml-2"
+                        >
+                            <li
+                                v-for="student in fleet.assigned_students"
+                                :key="student.id"
+                                class="relative pl-4 py-1 rounded"
+                            >
+                                <!-- NUMBER -->
+                                <span
+                                    class="absolute -left-[10px] top-1 bg-white border-2 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold shadow-sm"
+                                    :style="{
+                                        borderColor:
+                                            colors[index % colors.length],
+                                        color: colors[index % colors.length],
+                                    }"
+                                >
+                                    {{
+                                        viewMode === "morning"
+                                            ? student.morning_route_order
+                                            : student.afternoon_route_order
+                                    }}
+                                </span>
+
+                                <!-- NAME -->
+                                <p class="font-medium text-gray-700">
+                                    {{ student.name }}
+                                </p>
+
+                                <!-- META -->
+                                <p class="text-xs text-gray-500">
+                                    Kls: {{ student.class_room || "-" }} | Sesi:
+                                    {{ student.session_out.substring(0, 5) }}
+                                </p>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>
+    </AuthenticatedLayout>
 </template>

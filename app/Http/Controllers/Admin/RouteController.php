@@ -8,6 +8,7 @@ use App\Models\Fleet;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
+use Illuminate\Support\Facades\Auth;
 
 class RouteController extends Controller
 {
@@ -20,6 +21,10 @@ class RouteController extends Controller
 
     public function index(Request $request)
     {
+        if (Auth::user()?->role !== 'manager') {
+            abort(403);
+        }
+        
         // 1. Ambil semua Armada yang aktif
         $fleets = Fleet::where('is_active', true)->get();
 
@@ -35,6 +40,10 @@ class RouteController extends Controller
     // FUNGSI GENERATE
     public function generate(Request $request)
     {
+        if (Auth::user()?->role !== 'manager') {
+            abort(403);
+        }
+        
         // Jalankan Algoritma (Logika Include Unpaid sudah kita buang sesuai kesepakatan)
         $this->optimizer->optimize();
 

@@ -1,9 +1,22 @@
 <script setup>
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout.vue";
 import { Head, router } from "@inertiajs/vue3";
+import { computed } from "vue";
 
-defineProps({
+const props = defineProps({
     students: Array,
+});
+
+const unpaidCount = computed(() => {
+    return props.students.filter((student) => student.payment_status === "unpaid").length;
+});
+
+const paidCount = computed(() => {
+    return props.students.filter((student) => student.payment_status === "paid").length;
+});
+
+const activeCount = computed(() => {
+    return props.students.filter((student) => student.status === "active").length;
 });
 
 // Fungsi Format Rupiah
@@ -47,9 +60,24 @@ const confirmPayment = (student) => {
             <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
                 <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                     <div class="p-6 bg-white border-b border-gray-200">
-                        <h3 class="text-lg font-bold mb-4 text-gray-700">
-                            Daftar Pendaftaran Langganan
-                        </h3>
+                        <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <h3 class="text-lg font-bold text-gray-700">
+                                Daftar Pendaftaran Langganan
+                            </h3>
+
+                            <div class="flex flex-wrap gap-2">
+                                <span class="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+                                    Belum Bayar: {{ unpaidCount }}
+                                </span>
+                                <span class="rounded-full border border-green-200 bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+                                    Lunas: {{ paidCount }}
+                                </span>
+                                <span class="rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
+                                    Aktif: {{ activeCount }}
+                                </span>
+                            </div>
+                        </div>
+
 
                         <div class="overflow-x-auto">
                             <table class="w-full text-left border-collapse">
@@ -140,21 +168,31 @@ const confirmPayment = (student) => {
                                         </td>
                                         <td class="p-3">
                                             <span
-                                                v-if="
-                                                    student.status ===
-                                                    'registered'
-                                                "
-                                                class="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded"
-                                                >Menunggu Rute</span
+                                                v-if="student.payment_status === 'unpaid'"
+                                                class="text-xs font-bold text-red-600 bg-red-100 px-2 py-1 rounded"
                                             >
+                                                Menunggu Verifikasi
+                                            </span>
                                             <span
-                                                v-else-if="
-                                                    student.status === 'active'
-                                                "
-                                                class="text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded"
-                                                >Aktif</span
+                                                v-else-if="student.status === 'registered'"
+                                                class="text-xs font-bold text-yellow-600 bg-yellow-100 px-2 py-1 rounded"
                                             >
+                                                Lunas, Menunggu Rute
+                                            </span>
+                                            <span
+                                                v-else-if="student.status === 'active'"
+                                                class="text-xs font-bold text-green-600 bg-green-100 px-2 py-1 rounded"
+                                            >
+                                                Aktif
+                                            </span>
+                                            <span
+                                                v-else
+                                                class="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded"
+                                            >
+                                                Belum Diproses
+                                            </span>
                                         </td>
+
                                         <td class="p-3 text-center">
                                             <span
                                                 v-if="

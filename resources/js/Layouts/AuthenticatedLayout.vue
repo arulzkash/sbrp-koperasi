@@ -1,14 +1,55 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import ApplicationLogo from '@/Components/ApplicationLogo.vue';
 import Dropdown from '@/Components/Dropdown.vue';
 import DropdownLink from '@/Components/DropdownLink.vue';
 import NavLink from '@/Components/NavLink.vue';
 import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
-import { Link } from '@inertiajs/vue3';
+import { Link, usePage } from '@inertiajs/vue3';
 
 const showingNavigationDropdown = ref(false);
+const page = usePage();
+
+const user = computed(() => page.props.auth.user);
+const userRole = computed(() => user.value?.role ?? 'parent');
+
+const navigationLinks = computed(() => {
+    if (userRole.value === 'manager') {
+        return [
+            {
+                label: 'Monitoring Armada',
+                href: route('admin.dashboard'),
+                active: route().current('admin.dashboard'),
+            },
+        ];
+    }
+
+    if (userRole.value === 'finance') {
+        return [
+            {
+                label: 'Pembayaran',
+                href: route('finance.students'),
+                active: route().current('finance.students'),
+            },
+        ];
+    }
+
+    return [
+        {
+            label: 'Dashboard',
+            href: route('dashboard'),
+            active: route().current('dashboard'),
+        },
+    ];
+});
+
+const roleLabel = computed(() => {
+    if (userRole.value === 'manager') return 'Manager Operasional';
+    if (userRole.value === 'finance') return 'Admin Keuangan';
+    return 'Orang Tua';
+});
 </script>
+
 
 <template>
     <div>
@@ -34,10 +75,12 @@ const showingNavigationDropdown = ref(false);
                                 class="hidden space-x-8 sm:-my-px sm:ms-10 sm:flex"
                             >
                                 <NavLink
-                                    :href="route('dashboard')"
-                                    :active="route().current('dashboard')"
+                                    v-for="item in navigationLinks"
+                                    :key="item.href"
+                                    :href="item.href"
+                                    :active="item.active"
                                 >
-                                    Dashboard
+                                    {{ item.label }}
                                 </NavLink>
                             </div>
                         </div>
@@ -52,7 +95,7 @@ const showingNavigationDropdown = ref(false);
                                                 type="button"
                                                 class="inline-flex items-center rounded-md border border-transparent bg-white px-3 py-2 text-sm font-medium leading-4 text-gray-500 transition duration-150 ease-in-out hover:text-gray-700 focus:outline-none"
                                             >
-                                                {{ $page.props.auth.user.name }}
+                                                {{ $page.props.auth.user.name }} • {{ roleLabel }}
 
                                                 <svg
                                                     class="-me-0.5 ms-2 h-4 w-4"
@@ -141,10 +184,12 @@ const showingNavigationDropdown = ref(false);
                 >
                     <div class="space-y-1 pb-3 pt-2">
                         <ResponsiveNavLink
-                            :href="route('dashboard')"
-                            :active="route().current('dashboard')"
+                            v-for="item in navigationLinks"
+                            :key="item.href"
+                            :href="item.href"
+                            :active="item.active"
                         >
-                            Dashboard
+                            {{ item.label }}
                         </ResponsiveNavLink>
                     </div>
 
@@ -160,6 +205,9 @@ const showingNavigationDropdown = ref(false);
                             </div>
                             <div class="text-sm font-medium text-gray-500">
                                 {{ $page.props.auth.user.email }}
+                            </div>
+                            <div class="text-xs font-medium text-blue-600 mt-1">
+                                {{ roleLabel }}
                             </div>
                         </div>
 

@@ -30,12 +30,14 @@ Route::get('/', function () {
 Route::get('/dashboard', function () {
     $user = Auth::user();
 
-    // Kalau yang login adalah ADMIN/MANAGER, lempar ke dashboard admin yang peta kemarin
     if ($user->role === 'manager') {
-        return redirect('/admin/test-route');
+        return redirect()->route('admin.dashboard');
     }
 
-    // Kalau yang login ORANG TUA, ambil data anak-anaknya beserta info armada (jika ada)
+    if ($user->role === 'finance') {
+        return redirect()->route('finance.students');
+    }
+
     $children = Student::with(['morningFleet', 'afternoonFleet'])
         ->where('user_id', $user->id)
         ->get();
@@ -94,14 +96,11 @@ Route::middleware('auth')->group(function () {
 
     Route::prefix('finance')->group(function () {
         Route::get('/students', [FinanceController::class, 'index'])->name('finance.students');
-
         Route::put('/students/{id}/pay', [FinanceController::class, 'markAsPaid'])->name('finance.students.pay');
     });
 });
 
-Route::get('/admin/dashboard', [RouteController::class, 'dashboard'])->name('admin.dashboard');
-
-Route::get('/admin/test-route', [RouteController::class, 'index']);
-Route::post('/admin/test-route/generate', [RouteController::class, 'generate']);
+Route::get('/admin/dashboard', [RouteController::class, 'index'])->name('admin.dashboard');
+Route::post('/admin/dashboard/generate', [RouteController::class, 'generate']);
 
 require __DIR__ . '/auth.php';
