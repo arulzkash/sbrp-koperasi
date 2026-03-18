@@ -1,62 +1,62 @@
 <script setup>
-import { computed, ref } from 'vue';
-import ApplicationLogo from '@/Components/ApplicationLogo.vue';
-import Dropdown from '@/Components/Dropdown.vue';
-import DropdownLink from '@/Components/DropdownLink.vue';
-import NavLink from '@/Components/NavLink.vue';
-import ResponsiveNavLink from '@/Components/ResponsiveNavLink.vue';
-import { Link, usePage } from '@inertiajs/vue3';
+import { computed, ref } from "vue";
+import ApplicationLogo from "@/Components/ApplicationLogo.vue";
+import Dropdown from "@/Components/Dropdown.vue";
+import DropdownLink from "@/Components/DropdownLink.vue";
+import NavLink from "@/Components/NavLink.vue";
+import ResponsiveNavLink from "@/Components/ResponsiveNavLink.vue";
+import { Link, usePage } from "@inertiajs/vue3";
 
 const showingNavigationDropdown = ref(false);
 const page = usePage();
 
 const user = computed(() => page.props.auth.user);
-const userRole = computed(() => user.value?.role ?? 'parent');
+const userRole = computed(() => user.value?.role ?? "parent");
 
 const navigationLinks = computed(() => {
-    if (userRole.value === 'manager') {
+    if (userRole.value === "manager") {
         return [
             {
-                label: 'Monitoring Armada',
-                href: route('admin.dashboard'),
-                active: route().current('admin.dashboard'),
+                label: "Monitoring Armada",
+                href: route("admin.dashboard"),
+                active: route().current("admin.dashboard"),
             },
         ];
     }
 
-    if (userRole.value === 'finance') {
+    if (userRole.value === "finance") {
         return [
             {
-                label: 'Pembayaran',
-                href: route('finance.students'),
-                active: route().current('finance.students'),
+                label: "Pembayaran",
+                href: route("finance.students"),
+                active: route().current("finance.students"),
             },
         ];
     }
 
     return [
         {
-            label: 'Dashboard',
-            href: route('dashboard'),
-            active: route().current('dashboard'),
+            label: "Dashboard",
+            href: route("dashboard"),
+            active: route().current("dashboard"),
         },
     ];
 });
 
 const roleLabel = computed(() => {
-    if (userRole.value === 'manager') return 'Manager Operasional';
-    if (userRole.value === 'finance') return 'Admin Keuangan';
-    return 'Orang Tua';
+    if (userRole.value === "manager") return "Manager Operasional";
+    if (userRole.value === "finance") return "Admin Keuangan";
+    return "Orang Tua";
 });
-</script>
 
+const flashSuccess = computed(() => page.props.flash?.success);
+const flashError = computed(() => page.props.flash?.error);
+</script>
 
 <template>
     <div>
         <div class="min-h-screen bg-gray-100">
-            <nav
-                class="border-b border-gray-100 bg-white"
-            >
+            <nav class="border-b border-gray-100 bg-white">
                 <!-- Primary Navigation Menu -->
                 <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                     <div class="flex h-16 justify-between">
@@ -95,7 +95,10 @@ const roleLabel = computed(() => {
                                                 type="button"
                                                 class="inline-flex items-center rounded-md border border-transparent bg-white px-3 py-2 text-sm font-medium leading-4 text-gray-500 transition duration-150 ease-in-out hover:text-gray-700 focus:outline-none"
                                             >
-                                                {{ $page.props.auth.user.name }} • {{ roleLabel }}
+                                                {{
+                                                    $page.props.auth.user.name
+                                                }}
+                                                • {{ roleLabel }}
 
                                                 <svg
                                                     class="-me-0.5 ms-2 h-4 w-4"
@@ -194,13 +197,9 @@ const roleLabel = computed(() => {
                     </div>
 
                     <!-- Responsive Settings Options -->
-                    <div
-                        class="border-t border-gray-200 pb-1 pt-4"
-                    >
+                    <div class="border-t border-gray-200 pb-1 pt-4">
                         <div class="px-4">
-                            <div
-                                class="text-base font-medium text-gray-800"
-                            >
+                            <div class="text-base font-medium text-gray-800">
                                 {{ $page.props.auth.user.name }}
                             </div>
                             <div class="text-sm font-medium text-gray-500">
@@ -228,14 +227,30 @@ const roleLabel = computed(() => {
             </nav>
 
             <!-- Page Heading -->
-            <header
-                class="bg-white shadow"
-                v-if="$slots.header"
-            >
+            <header class="bg-white shadow" v-if="$slots.header">
                 <div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
                     <slot name="header" />
                 </div>
             </header>
+
+            <div
+                v-if="flashSuccess || flashError"
+                class="mx-auto max-w-7xl px-4 pt-4 sm:px-6 lg:px-8"
+            >
+                <div
+                    v-if="flashSuccess"
+                    class="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-800"
+                >
+                    {{ flashSuccess }}
+                </div>
+
+                <div
+                    v-if="flashError"
+                    class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
+                >
+                    {{ flashError }}
+                </div>
+            </div>
 
             <!-- Page Content -->
             <main>

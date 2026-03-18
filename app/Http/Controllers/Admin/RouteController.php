@@ -24,7 +24,7 @@ class RouteController extends Controller
         if (Auth::user()?->role !== 'manager') {
             abort(403);
         }
-        
+
         // 1. Ambil semua Armada yang aktif
         $fleets = Fleet::where('is_active', true)->get();
 
@@ -48,6 +48,6 @@ class RouteController extends Controller
         $this->optimizer->optimize();
 
         // Redirect/Kembali ke halaman map
-        return redirect()->back();
+        return redirect()->back()->with('success', 'Generate rute berhasil dijalankan.');
     }
 }
