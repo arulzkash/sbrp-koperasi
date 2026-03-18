@@ -140,7 +140,6 @@ const updateMapAndData = async (lat, lng) => {
         const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${SCHOOL_LNG},${SCHOOL_LAT}?overview=full&geometries=geojson`;
 
         const response = await fetch(osrmUrl);
-
         const data = await response.json();
 
         if (data?.routes?.length > 0) {
@@ -159,7 +158,7 @@ const updateMapAndData = async (lat, lng) => {
             const coordinates = route.geometry.coordinates.map((c) => [c[1], c[0]]);
 
             routeLine = L.polyline(coordinates, {
-                color: "blue",
+                color: "#2563eb",
                 weight: 5,
                 opacity: 0.8,
             }).addTo(map);
@@ -275,93 +274,81 @@ const formatRupiah = (angka) => {
             </h2>
         </template>
 
-        <div class="py-12">
-
+        <div class="py-6 sm:py-8 lg:py-10">
             <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
-
                 <form
                     @submit.prevent="submit"
-                    class="bg-white p-6 rounded-lg shadow border border-gray-200 flex flex-col md:flex-row gap-6"
+                    class="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6"
                 >
-
                     <div class="md:w-1/3 flex flex-col gap-4">
-
-                        <div class="bg-blue-50 p-4 rounded border border-blue-200">
-                            <h3 class="font-bold text-blue-800 mb-2">Instruksi:</h3>
-                            <ul class="text-sm text-blue-700 list-disc pl-4 space-y-1">
+                        <div class="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                            <h3 class="font-bold text-blue-800 text-sm mb-1">Instruksi:</h3>
+                            <ul class="text-xs text-blue-700 list-disc pl-4 space-y-0.5">
                                 <li>Geser pin ke posisi rumah yang paling presisi.</li>
                                 <li>Tambahkan patokan rumah pada alamat.</li>
                             </ul>
                         </div>
 
                         <div>
-                            <label class="block font-bold text-gray-700 mb-1">
+                            <label class="block font-bold text-slate-700 text-xs mb-1">
                                 Detail Alamat Lengkap
                             </label>
-
                             <textarea
                                 v-model="form.address_text"
                                 rows="3"
-                                class="w-full border-gray-300 rounded focus:ring-blue-500 focus:border-blue-500"
+                                placeholder="Gg. Kancil No. 5 (Pagar Hitam)"
+                                class="w-full border-slate-200 rounded-xl text-sm focus:ring-blue-500 focus:border-blue-500"
                                 required
                             ></textarea>
-
-                            <p class="text-xs text-gray-500 mt-1">
-                                Alamat ini akan dibaca oleh supir armada.
-                            </p>
                         </div>
 
-                        <div class="bg-gray-100 p-4 rounded border mt-auto">
-
-                            <p class="text-sm text-gray-500 mb-2">
-                                Jarak Rute Aspal:
-                                <b>{{ form.distance.toFixed(2) }} KM</b>
-                            </p>
-
-                            <div class="mb-3 bg-white p-2 rounded border">
-                                <p class="text-xs text-gray-500 mb-1">
-                                    Tarif Baru Paket Antar-Jemput (PP)
-                                </p>
-
-                                <b class="text-blue-600 text-lg">
-                                    {{ formatRupiah(form.price) }}
-                                </b>
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mt-auto space-y-3">
+                            <div class="flex justify-between items-center text-xs text-slate-500 mb-1">
+                                <span>Jarak Rute Aspal:</span>
+                                <b class="text-slate-900">{{ form.distance.toFixed(2) }} KM</b>
                             </div>
 
-                            <div class="mb-4 bg-white p-2 rounded border">
-                                <p class="text-xs text-gray-500 mb-1">
-                                    Paket 1 Arah
-                                </p>
+                            <div class="grid grid-cols-1 gap-2">
+                                <div class="bg-white p-2.5 rounded-lg border border-slate-100">
+                                    <p class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">
+                                        Tarif PP
+                                    </p>
+                                    <b class="text-blue-600 text-base">
+                                        {{ formatRupiah(form.price) }}
+                                    </b>
+                                </div>
 
-                                <b class="text-orange-500">
-                                    {{ formatRupiah(form.one_way_price) }}
-                                </b>
+                                <div class="bg-white p-2.5 rounded-lg border border-slate-100">
+                                    <p class="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-0.5">
+                                        Paket 1 Arah
+                                    </p>
+                                    <b class="text-orange-500 text-sm">
+                                        {{ formatRupiah(form.one_way_price) }}
+                                    </b>
+                                </div>
                             </div>
 
                             <button
                                 type="submit"
                                 :disabled="form.processing"
-                                class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded"
+                                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition disabled:opacity-50"
                             >
-                                {{ form.processing ? "Menyimpan..." : "Simpan Perubahan" }}
+                                {{ form.processing ? "..." : "Simpan Perubahan" }}
                             </button>
-
                         </div>
-
                     </div>
 
                     <div class="md:w-2/3">
                         <div
                             id="edit-map"
-                            class="h-[500px] w-full rounded border-2 border-gray-300"
+                            class="h-[350px] sm:h-[400px] lg:h-[450px] w-full rounded-2xl border border-slate-200 shadow-inner overflow-hidden"
                         ></div>
+                        <p class="text-[10px] text-slate-400 mt-2 text-center italic">
+                            * Marker ditarik ke depan gerbang rumah untuk akurasi penjemputan.
+                        </p>
                     </div>
-
                 </form>
-
             </div>
-
         </div>
-
     </AuthenticatedLayout>
 </template>

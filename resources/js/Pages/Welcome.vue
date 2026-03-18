@@ -18,13 +18,13 @@ const SCHOOL_LNG = 107.63886429303408;
 const userLat = ref(null);
 const userLng = ref(null);
 
-const distanceMeters = ref(0);   // dipakai untuk hitung harga
-const distanceKm = ref(0);       // dipakai untuk tampilan
+const distanceMeters = ref(0);
+const distanceKm = ref(0);
 const durationMin = ref(0);
 
-const estimatedTripFare = ref(0);      // 1x perjalanan
-const estimatedPrice = ref(0);         // bulanan PP
-const estimatedPriceOneWay = ref(0);   // bulanan 1 arah
+const estimatedTripFare = ref(0);
+const estimatedPrice = ref(0);
+const estimatedPriceOneWay = ref(0);
 
 const accessSurcharge = ref(0);
 
@@ -39,11 +39,11 @@ const RATE_MONTHLY_PER_MINUTE_PP = 1000;
 const ONE_WAY_RATIO = 0.52;
 
 const DISTANCE_BANDS = [
-    { upto: 1000, rate: 15 },      // 0 - 1 km
-    { upto: 2000, rate: 50 },      // 1 - 2 km
-    { upto: 4000, rate: 55 },      // 2 - 4 km
-    { upto: 10000, rate: 13 },     // 4 - 10 km
-    { upto: Infinity, rate: 8 },   // > 10 km
+    { upto: 1000, rate: 15 },
+    { upto: 2000, rate: 50 },
+    { upto: 4000, rate: 55 },
+    { upto: 10000, rate: 13 },
+    { upto: Infinity, rate: 8 },
 ];
 
 const FALLBACK_SPEED_KMH = 18;
@@ -61,7 +61,6 @@ let routeLine = null;
 // =========================
 // HELPERS
 // =========================
-
 const calculateDistanceCharge = (meters) => {
     let total = 0;
     let previousLimit = 0;
@@ -82,8 +81,6 @@ const calculateDistanceCharge = (meters) => {
 
     return total;
 };
-
-const ceilToStep = (value, step = 1000) => Math.ceil(value / step) * step;
 
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371;
@@ -183,7 +180,7 @@ const updateLocation = async (lat, lng) => {
 
             const coordinates = route.geometry.coordinates.map((c) => [c[1], c[0]]);
             routeLine = L.polyline(coordinates, {
-                color: "blue",
+                color: "#2563eb", // blue-600
                 weight: 5,
                 opacity: 0.8,
             }).addTo(map);
@@ -283,152 +280,137 @@ const formatRupiah = (angka) => {
 <template>
     <Head title="Cek Harga Antar-Jemput" />
 
-    <div
-        class="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4"
-    >
-        <div
-            class="max-w-5xl w-full bg-white rounded-xl shadow-lg overflow-hidden"
-        >
-            <div class="bg-blue-600 p-6 text-white text-center">
-                <h1 class="text-3xl font-bold">
-                    Koperasi Bisa Berdikari Usaha
-                </h1>
-                <p class="mt-2 opacity-90">
-                    Layanan Antar-Jemput Siswa Terintegrasi area Lembang
-                </p>
-            </div>
-
-            <div class="p-6 md:flex gap-6">
-                <div class="md:w-2/3 flex flex-col">
-                    <h2 class="text-lg font-bold text-gray-800 mb-2">
-                        1. Tentukan Titik Jemput
-                    </h2>
-
-                    <div class="flex gap-2 mb-4">
-                        <input
-                            v-model="searchQuery"
-                            @keyup.enter="searchAddress"
-                            type="text"
-                            placeholder="Contoh: Jl. Maribaya No 10..."
-                            class="w-full border-gray-300 rounded focus:border-blue-500 focus:ring-blue-500 shadow-sm"
-                        />
-                        <button
-                            @click="searchAddress"
-                            :disabled="isSearching"
-                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors disabled:opacity-50"
-                        >
-                            {{ isSearching ? "Mencari..." : "Cari" }}
-                        </button>
+    <div class="min-h-screen bg-slate-50">
+        <div class="mx-auto max-w-6xl px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
+            <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                <div class="bg-gradient-to-r from-blue-600 to-blue-500 px-5 py-4 text-white sm:px-8 sm:py-6">
+                    <div class="mx-auto max-w-3xl text-center">
+                        <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-blue-100">
+                            Antar Jemput Siswa
+                        </p>
+                        <h1 class="mt-1 text-xl font-bold sm:text-2xl">
+                            Koperasi Bisa Berdikari Usaha
+                        </h1>
+                        <p class="mt-1 text-xs text-blue-100 sm:text-sm">
+                            Cek estimasi tarif area Lembang berdasarkan titik jemput dan rute jalan.
+                        </p>
                     </div>
-
-                    <p class="text-sm text-gray-600 mb-2">
-                        Atau klik langsung pada peta.
-                        <b>Anda bisa menggeser (drag) pin biru</b> ke dalam gang
-                        untuk lokasi yang presisi.
-                    </p>
-
-                    <div
-                        id="landing-map"
-                        class="h-[400px] w-full rounded border-2 border-gray-300 z-0 flex-grow"
-                    ></div>
                 </div>
 
-                <div class="md:w-1/3 mt-6 md:mt-0 flex flex-col justify-center">
-                    <div
-                        class="bg-gray-100 p-6 rounded-lg border border-gray-200 text-center"
-                    >
-                        <h3 class="text-gray-500 font-semibold mb-2">
-                            Estimasi Tarif per Bulan
-                        </h3>
-
-                        <div v-if="distanceKm > 0">
-                            <p class="text-3xl font-extrabold text-blue-600 my-4">
-                                <span class="text-sm text-gray-500 font-normal block mb-1">
-                                    Paket Antar Jemput (PP):
-                                </span>
-                                {{ formatRupiah(estimatedPrice) }}
-                            </p>
-
-                            <p class="text-xl font-bold text-orange-500 mb-4 pb-4 border-b border-gray-200">
-                                <span class="text-sm text-gray-500 font-normal block mb-1">
-                                    Paket 1 Arah (Pergi / Pulang Saja):
-                                </span>
-                                {{ formatRupiah(estimatedPriceOneWay) }}
-                            </p>
-
-                            <div class="bg-white border rounded-lg p-4 text-left mb-4">
-                                <h4 class="font-semibold text-gray-700 mb-2">Ringkasan Estimasi</h4>
-
-                                <div class="text-sm text-gray-600 space-y-1">
-                                    <p>Jarak rute jalan: <b>{{ distanceKm.toFixed(2) }} KM</b></p>
-                                    <p>Durasi rute: <b>{{ Math.ceil(durationMin) }} menit</b></p>
-                                    <p>Estimasi 1x perjalanan: <b>{{ formatRupiah(estimatedTripFare) }}</b></p>
+                <div class="p-4 sm:p-5 lg:p-6 lg:border-b-0">
+                    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <!-- MAP SECTION -->
+                        <div class="lg:col-span-8 space-y-4">
+                            <div class="flex flex-col sm:flex-row gap-3 items-center justify-between">
+                                <div class="flex-shrink-0">
+                                    <h2 class="text-base font-semibold text-slate-900">
+                                        1. Tentukan titik jemput
+                                    </h2>
+                                </div>
+                                <div class="flex flex-1 w-full gap-2">
+                                    <input
+                                        v-model="searchQuery"
+                                        @keyup.enter="searchAddress"
+                                        type="text"
+                                        placeholder="Cari jalan/alamat..."
+                                        class="w-full rounded-lg border-slate-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                                    />
+                                    <button
+                                        @click="searchAddress"
+                                        :disabled="isSearching"
+                                        class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        {{ isSearching ? "..." : "Cari" }}
+                                    </button>
                                 </div>
                             </div>
 
-                            <div class="text-sm text-gray-600 space-y-1 mb-4">
-                                <p>Tarif dasar bulanan PP: {{ formatRupiah(BASE_MONTHLY_PP) }}</p>
-                                <p>Model tarif jarak: bertingkat berdasarkan jarak rute</p>
-                                <p>Tarif waktu bulanan: {{ formatRupiah(RATE_MONTHLY_PER_MINUTE_PP) }} / menit</p>
-                                <p>Rasio paket 1 arah: {{ Math.round(ONE_WAY_RATIO * 100) }}%</p>
+                            <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-inner">
+                                <div
+                                    id="landing-map"
+                                    class="h-[300px] w-full sm:h-[350px] lg:h-[400px]"
+                                ></div>
                             </div>
-
-                            <div class="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded p-3 mb-4">
-                                Estimasi tarif dihitung otomatis berdasarkan titik jemput, jarak rute, dan durasi.
-                                Untuk area akses khusus, harga final dapat diverifikasi admin.
-                            </div>
-
-                            <hr class="my-4 border-gray-300" />
-
-                            <Link
-                                v-if="canRegister"
-                                :href="
-                                    route('register', {
-                                        lat: userLat,
-                                        lng: userLng,
-                                        distance_km: distanceKm,
-                                        distance_meters: distanceMeters,
-                                        duration: durationMin,
-                                        price: estimatedPrice,
-                                        price_one_way: estimatedPriceOneWay,
-                                        trip_fare: estimatedTripFare,
-                                    })
-                                "
-                                class="block w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded transition duration-200"
-                            >
-                                Mulai Berlangganan
-                            </Link>
-                        </div>
-
-                        <div v-else class="py-8 text-gray-400">
-                            <svg
-                                class="w-12 h-12 mx-auto mb-3"
-                                fill="none"
-                                stroke="currentColor"
-                                viewBox="0 0 24 24"
-                            >
-                                <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-                                ></path>
-                            </svg>
-                            <p>
-                                Cari alamat atau klik lokasi rumah Anda di peta.
+                            <p class="text-[11px] leading-5 text-slate-500 italic">
+                                * Klik peta atau <span class="font-semibold">drag pin biru</span> untuk lokasi presisi (depan rumah).
                             </p>
                         </div>
-                    </div>
 
-                    <div class="mt-4 text-center">
-                        <p class="text-sm text-gray-500">Sudah punya akun?</p>
-                        <Link
-                            v-if="canLogin"
-                            :href="route('login')"
-                            class="text-blue-600 font-semibold hover:underline"
-                        >
-                            Login di sini
-                        </Link>
+                        <!-- PRICING SECTION -->
+                        <div class="lg:col-span-4 space-y-3">
+                            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                <div v-if="distanceKm > 0" class="space-y-3">
+                                    <div class="rounded-lg bg-blue-600 p-4 text-white shadow-sm">
+                                        <p class="text-[10px] font-medium uppercase tracking-wide text-blue-100">
+                                            Paket Antar Jemput (PP)
+                                        </p>
+                                        <p class="mt-1 text-2xl font-extrabold">
+                                            {{ formatRupiah(estimatedPrice) }}
+                                            <span class="text-xs font-normal text-blue-100">/bulan</span>
+                                        </p>
+                                    </div>
+
+                                    <div class="rounded-lg bg-white p-3 border border-orange-100 ring-1 ring-orange-50">
+                                        <p class="text-[10px] font-medium uppercase tracking-wide text-orange-600">
+                                            Paket 1 Arah
+                                        </p>
+                                        <p class="mt-0.5 text-lg font-bold text-orange-600">
+                                            {{ formatRupiah(estimatedPriceOneWay) }}
+                                            <span class="text-[10px] font-normal text-orange-400 text-right">/bulan</span>
+                                        </p>
+                                    </div>
+
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <div class="rounded-lg bg-white border border-slate-100 p-2">
+                                            <p class="text-[10px] text-slate-500">Jarak rute</p>
+                                            <p class="text-xs font-semibold text-slate-900">
+                                                {{ distanceKm.toFixed(2) }} KM
+                                            </p>
+                                        </div>
+                                        <div class="rounded-lg bg-white border border-slate-100 p-2">
+                                            <p class="text-[10px] text-slate-500">Durasi</p>
+                                            <p class="text-xs font-semibold text-slate-900">
+                                                {{ Math.ceil(durationMin) }} mnt
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <Link
+                                        v-if="canRegister"
+                                        :href="
+                                            route('register', {
+                                                lat: userLat,
+                                                lng: userLng,
+                                                distance_km: distanceKm,
+                                                distance_meters: distanceMeters,
+                                                duration: durationMin,
+                                                price: estimatedPrice,
+                                                price_one_way: estimatedPriceOneWay,
+                                                trip_fare: estimatedTripFare,
+                                            })
+                                        "
+                                        class="inline-flex w-full items-center justify-center rounded-xl bg-green-600 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700"
+                                    >
+                                        Mulai Berlangganan
+                                    </Link>
+
+                                    <div class="rounded-lg border border-amber-100 bg-amber-50 p-2 text-[10px] leading-4 text-amber-700">
+                                        * Estimasi tarif berdasarkan rute jalan resmi. Harga final dikonfirmasi admin.
+                                    </div>
+                                </div>
+
+                                <div v-else class="py-12 text-center text-slate-400">
+                                    <svg class="mx-auto mb-2 h-8 w-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
+                                    </svg>
+                                    <p class="text-xs font-medium text-slate-600">Pilih titik jemput di peta</p>
+                                </div>
+                            </div>
+                            
+                            <div v-if="canLogin" class="text-center pb-2">
+                                <p class="text-xs text-slate-500">Sudah punya akun? <Link :href="route('login')" class="font-semibold text-blue-600 hover:text-blue-700">Login</Link></p>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
