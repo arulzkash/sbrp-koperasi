@@ -32,7 +32,7 @@ class RouteOptimizerService
 
     /*
     |--------------------------------------------------------------------------
-    | MORNING ROUTE
+    | MORNING ROUTE (NEW: DRIVER-CENTRIC BASE)
     |--------------------------------------------------------------------------
     */
 
@@ -46,8 +46,8 @@ class RouteOptimizerService
 
         if ($fleets->isEmpty() || $students->isEmpty()) return;
 
-        // SWEEP ALGORITHM
-        $fleetStudents = $this->clusterBySweepAndCapacity($students, $fleets);
+        // 1. CLUSTER: Berdasarkan jarak terdekat ke rumah supir (Base)
+        $fleetStudents = $this->clusterByNearestBase($students, $fleets);
 
         foreach ($fleetStudents as $fleetId => $studentsForFleet) {
 
@@ -55,14 +55,12 @@ class RouteOptimizerService
 
             $fleet = $fleets->firstWhere('id', $fleetId);
 
-            // Morning: start from furthest, go towards school
-            $route = $this->sortRouteByDistance($studentsForFleet, 'desc');
-
-            $route = $this->twoOptImprove($route);
+            // 2. BUILD ROUTE & OPTIMIZE: Base Supir -> Murid Terdekat -> ... -> Sekolah
+            $route = $this->buildAndOptimizeMorningRoute($studentsForFleet, $fleet);
 
             foreach ($route as $order => $student) {
-                unset($student->sweep_angle);
-                unset($student->school_distance);
+                // Bersihkan properti dinamis
+                unset($student->fleet_distances);
 
                 $student->update([
                     'morning_fleet_id' => $fleet->id,
@@ -72,9 +70,139 @@ class RouteOptimizerService
         }
     }
 
+    private function clusterByNearestBase($students, $fleets)
+    {
+        $fleetStudents = [];
+        $fleetCapacities = [];
+        
+        foreach ($fleets as $fleet) {
+            $fleetStudents[$fleet->id] = [];
+            $fleetCapacities[$fleet->id] = $fleet->capacity;
+        }
+
+        // Hitung jarak setiap murid ke SEMUA base armada
+        foreach ($students as $student) {
+            $distances = [];
+            foreach ($fleets as $fleet) {
+                $dist = $this->calculateDistance(
+                    $student->latitude, $student->longitude,
+                    $fleet->base_latitude, $fleet->base_longitude
+                );
+                $distances[$fleet->id] = $dist;
+            }
+            // Urutkan fleet dari yang terdekat ke murid tersebut
+            asort($distances);
+            $student->fleet_distances = $distances;
+        }
+
+        // Assign murid ke armada terdekat yang masih punya kapasitas
+        foreach ($students as $student) {
+            foreach ($student->fleet_distances as $fleetId => $dist) {
+                if (count($fleetStudents[$fleetId]) < $fleetCapacities[$fleetId]) {
+                    $fleetStudents[$fleetId][] = $student;
+                    break; // Pindah ke murid selanjutnya
+                }
+            }
+        }
+
+        return $fleetStudents;
+    }
+
+    private function buildAndOptimizeMorningRoute($studentsForFleet, $fleet)
+    {
+        // A. NEAREST NEIGHBOR (Membangun Rute Awal dari Base)
+        $unvisited = $studentsForFleet;
+        $route = [];
+        $currentLat = $fleet->base_latitude;
+        $currentLng = $fleet->base_longitude;
+
+        while (!empty($unvisited)) {
+            $nearestIndex = -1;
+            $minDist = INF;
+
+            foreach ($unvisited as $index => $student) {
+                $dist = $this->calculateDistance($currentLat, $currentLng, $student->latitude, $student->longitude);
+                if ($dist < $minDist) {
+                    $minDist = $dist;
+                    $nearestIndex = $index;
+                }
+            }
+
+            $nearestStudent = $unvisited[$nearestIndex];
+            $route[] = $nearestStudent;
+            
+            $currentLat = $nearestStudent->latitude;
+            $currentLng = $nearestStudent->longitude;
+
+            unset($unvisited[$nearestIndex]);
+        }
+
+        // B. 2-OPT OPTIMIZATION (Mengunci Titik Start & Finish)
+        $route = $this->twoOptMorning($route, $fleet->base_latitude, $fleet->base_longitude);
+
+        return $route;
+    }
+
+    private function twoOptMorning($route, $baseLat, $baseLng)
+    {
+        $improved = true;
+
+        while ($improved) {
+            $improved = false;
+
+            for ($i = 0; $i < count($route) - 1; $i++) {
+                for ($j = $i + 1; $j < count($route); $j++) {
+                    
+                    $newRoute = $route;
+                    
+                    // Balik urutan segmen di antara i dan j
+                    $segment = array_slice($newRoute, $i, $j - $i + 1);
+                    $segment = array_reverse($segment);
+                    array_splice($newRoute, $i, $j - $i + 1, $segment);
+
+                    // Cek jika jarak rute baru lebih pendek
+                    if ($this->routeDistanceMorning($newRoute, $baseLat, $baseLng) < $this->routeDistanceMorning($route, $baseLat, $baseLng)) {
+                        $route = $newRoute;
+                        $improved = true;
+                    }
+                }
+            }
+        }
+
+        return $route;
+    }
+
+    private function routeDistanceMorning($route, $baseLat, $baseLng)
+    {
+        $distance = 0;
+        
+        // Mulai dari Base Armada
+        $prevLat = $baseLat;
+        $prevLng = $baseLng;
+
+        // Keliling ke murid-murid
+        foreach ($route as $student) {
+            $distance += $this->calculateDistance(
+                $prevLat, $prevLng,
+                $student->latitude, $student->longitude
+            );
+            $prevLat = $student->latitude;
+            $prevLng = $student->longitude;
+        }
+
+        // Titik akhir harus Sekolah
+        $distance += $this->calculateDistance(
+            $prevLat, $prevLng,
+            self::SCHOOL_LAT, self::SCHOOL_LNG
+        );
+
+        return $distance;
+    }
+
+
     /*
     |--------------------------------------------------------------------------
-    | AFTERNOON ROUTE
+    | AFTERNOON ROUTE (LAMA - TIDAK DIUBAH)
     |--------------------------------------------------------------------------
     */
 
@@ -121,7 +249,7 @@ class RouteOptimizerService
 
     /*
     |--------------------------------------------------------------------------
-    | SWEEP CLUSTERING (ANGULAR SORT)
+    | SWEEP CLUSTERING (ANGULAR SORT - LAMA)
     |--------------------------------------------------------------------------
     */
 
@@ -195,7 +323,7 @@ class RouteOptimizerService
 
     /*
     |--------------------------------------------------------------------------
-    | ROUTE CONSTRUCTION
+    | ROUTE CONSTRUCTION (LAMA)
     |--------------------------------------------------------------------------
     */
 
@@ -224,7 +352,7 @@ class RouteOptimizerService
 
     /*
     |--------------------------------------------------------------------------
-    | 2-OPT IMPROVEMENT
+    | 2-OPT IMPROVEMENT (LAMA - UNTUK SORE)
     |--------------------------------------------------------------------------
     */
 
