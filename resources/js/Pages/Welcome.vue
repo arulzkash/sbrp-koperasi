@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
 import { Head, Link } from "@inertiajs/vue3";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -53,10 +53,16 @@ const FALLBACK_SPEED_KMH = 18;
 // =========================
 const searchQuery = ref("");
 const isSearching = ref(false);
+const isRouting = ref(false);
+const isRoutePending = ref(false);
 
 let map = null;
 let userMarker = null;
 let routeLine = null;
+let routeDebounceTimer = null;
+let routeRequestSequence = 0;
+let latestRouteRequestId = 0;
+let activeRouteController = null;
 
 // =========================
 // HELPERS
@@ -137,10 +143,96 @@ const applyPricing = () => {
     monthlyDurationCharge.value = pricing.durationCharge;
 };
 
+const renderFallbackRoute = (lat, lng) => {
+    distanceKm.value = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
+    distanceMeters.value = distanceKm.value * 1000;
+    durationMin.value = (distanceKm.value / FALLBACK_SPEED_KMH) * 60;
+
+    routeLine = L.polyline(
+        [
+            [lat, lng],
+            [SCHOOL_LAT, SCHOOL_LNG],
+        ],
+        {
+            color: "gray",
+            dashArray: "5, 10",
+            weight: 3,
+        },
+    ).addTo(map);
+};
+
+const runRouteCalculation = async (lat, lng) => {
+    const requestId = ++routeRequestSequence;
+    latestRouteRequestId = requestId;
+
+    isRoutePending.value = false;
+    isRouting.value = true;
+
+    if (activeRouteController) {
+        activeRouteController.abort();
+    }
+
+    activeRouteController = new AbortController();
+
+    if (routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null;
+    }
+
+    try {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${SCHOOL_LNG},${SCHOOL_LAT}?overview=full&geometries=geojson`;
+        const response = await fetch(osrmUrl, {
+            signal: activeRouteController.signal,
+        });
+        const data = await response.json();
+
+        if (requestId !== latestRouteRequestId) {
+            return;
+        }
+
+        if (data?.routes?.length > 0) {
+            const route = data.routes[0];
+
+            distanceMeters.value = route.distance;
+            distanceKm.value = route.distance / 1000;
+            durationMin.value = route.duration / 60;
+
+            const coordinates = route.geometry.coordinates.map((c) => [
+                c[1],
+                c[0],
+            ]);
+            routeLine = L.polyline(coordinates, {
+                color: "#2563eb",
+                weight: 5,
+                opacity: 0.8,
+            }).addTo(map);
+        } else {
+            throw new Error("No route found");
+        }
+    } catch (error) {
+        if (error.name === "AbortError") {
+            return;
+        }
+
+        if (requestId !== latestRouteRequestId) {
+            return;
+        }
+
+        console.warn("OSRM failed, fallback to straight line", error);
+        renderFallbackRoute(lat, lng);
+    } finally {
+        if (requestId === latestRouteRequestId) {
+            applyPricing();
+            isRouting.value = false;
+            activeRouteController = null;
+        }
+    }
+};
+
 // =========================
 // UPDATE LOKASI + ROUTING + PRICING
 // =========================
-const updateLocation = async (lat, lng) => {
+const updateLocation = (lat, lng) => {
     userLat.value = lat;
     userLng.value = lng;
 
@@ -159,55 +251,15 @@ const updateLocation = async (lat, lng) => {
         userMarker.setLatLng([lat, lng]);
     }
 
-    if (routeLine) {
-        map.removeLayer(routeLine);
+    if (routeDebounceTimer) {
+        clearTimeout(routeDebounceTimer);
     }
 
-    try {
-        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${SCHOOL_LNG},${SCHOOL_LAT}?overview=full&geometries=geojson`;
-        const response = await fetch(osrmUrl);
-        const data = await response.json();
+    isRoutePending.value = true;
 
-        if (data?.routes?.length > 0) {
-            const route = data.routes[0];
-
-            distanceMeters.value = route.distance;
-            distanceKm.value = route.distance / 1000;
-            durationMin.value = route.duration / 60;
-
-            const coordinates = route.geometry.coordinates.map((c) => [
-                c[1],
-                c[0],
-            ]);
-            routeLine = L.polyline(coordinates, {
-                color: "#2563eb", // blue-600
-                weight: 5,
-                opacity: 0.8,
-            }).addTo(map);
-        } else {
-            throw new Error("No route found");
-        }
-    } catch (error) {
-        console.warn("OSRM failed, fallback to straight line", error);
-
-        distanceKm.value = calculateDistance(lat, lng, SCHOOL_LAT, SCHOOL_LNG);
-        distanceMeters.value = distanceKm.value * 1000;
-        durationMin.value = (distanceKm.value / FALLBACK_SPEED_KMH) * 60;
-
-        routeLine = L.polyline(
-            [
-                [lat, lng],
-                [SCHOOL_LAT, SCHOOL_LNG],
-            ],
-            {
-                color: "gray",
-                dashArray: "5, 10",
-                weight: 3,
-            },
-        ).addTo(map);
-    }
-
-    applyPricing();
+    routeDebounceTimer = setTimeout(() => {
+        runRouteCalculation(lat, lng);
+    }, 1000);
 };
 
 // =========================
@@ -266,6 +318,16 @@ onMounted(() => {
         .openPopup();
 
     map.on("click", (e) => updateLocation(e.latlng.lat, e.latlng.lng));
+});
+
+onBeforeUnmount(() => {
+    if (routeDebounceTimer) {
+        clearTimeout(routeDebounceTimer);
+    }
+
+    if (activeRouteController) {
+        activeRouteController.abort();
+    }
 });
 
 const formatRupiah = (angka) => {
@@ -396,6 +458,16 @@ const formatRupiah = (angka) => {
                                 * Klik peta atau
                                 <span class="font-semibold">drag pin biru</span>
                                 untuk lokasi presisi (depan rumah).
+                            </p>
+                            <p
+                                v-if="isRoutePending || isRouting"
+                                class="text-[11px] leading-5 text-blue-600"
+                            >
+                                {{
+                                    isRoutePending
+                                        ? "Menunggu 1 detik sebelum menghitung rute terbaru..."
+                                        : "Sedang menghitung visual rute terbaru..."
+                                }}
                             </p>
                         </div>
 
