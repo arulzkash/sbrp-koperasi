@@ -30,6 +30,14 @@ const routeCache = new Map();
 
 const SCHOOL_COORD = [-6.826864390637824, 107.63886429303408];
 
+const formatClass = (student) => {
+    if (!student.class_room) return "-";
+
+    return student.class_room_note
+        ? `${student.class_room} (${student.class_room_note})`
+        : student.class_room;
+};
+
 // Daftar warna armada
 const colors = [
     "#ef4444",
@@ -774,7 +782,7 @@ onMounted(() => {
 
                                 <!-- META -->
                                 <p class="text-xs text-gray-500">
-                                    Kls: {{ student.class_room || "-" }} | Sesi:
+                                    Kls: {{ formatClass(student) }} | Sesi:
                                     {{ student.session_out.substring(0, 5) }}
                                 </p>
                             </li>

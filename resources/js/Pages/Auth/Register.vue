@@ -5,6 +5,14 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import { Head, Link, useForm } from '@inertiajs/vue3';
+import { computed, watch } from 'vue';
+
+const props = defineProps({
+    classOptions: {
+        type: Object,
+        default: () => ({}),
+    },
+});
 
 const params = new URLSearchParams(window.location.search);
 
@@ -26,11 +34,12 @@ const form = useForm({
 
     student_name: '',
     school_level: 'SD',
-    class_room: '',
+    class_room: '1',
+    class_room_note: '',
 
     service_type: 'full',
     session_in: '06:30',
-    session_out: '13:00',
+    session_out: '13:30',
 
     latitude: params.get('lat') || '',
     longitude: params.get('lng') || '',
@@ -39,6 +48,27 @@ const form = useForm({
 });
 
 const hasPickupPoint = !!form.latitude && !!form.longitude;
+const schoolLevelOptions = computed(() => props.classOptions[form.school_level] ?? []);
+const selectedClassOption = computed(() => {
+    return schoolLevelOptions.value.find((option) => option.value === form.class_room) ?? null;
+});
+
+watch(
+    () => form.school_level,
+    (level) => {
+        const firstOption = props.classOptions[level]?.[0];
+        form.class_room = firstOption?.value ?? '';
+    },
+    { immediate: true },
+);
+
+watch(
+    () => form.class_room,
+    () => {
+        form.session_out = selectedClassOption.value?.session_out ?? '';
+    },
+    { immediate: true },
+);
 
 const submit = () => {
     form.post(route('register'), {
@@ -253,16 +283,52 @@ const formatDistanceKm = (angka) => {
 
                             <div>
                                 <InputLabel for="class_room" value="Kelas" />
-                                <TextInput
+                                <select
                                     id="class_room"
-                                    type="text"
-                                    class="mt-1 block w-full rounded-xl border-slate-300"
                                     v-model="form.class_room"
+                                    class="mt-1 block w-full rounded-xl border-slate-300 focus:border-blue-500 focus:ring-blue-500"
                                     :required="hasPickupPoint"
-                                    placeholder="Contoh: 4B, 7A, A1"
-                                />
+                                >
+                                    <option
+                                        v-for="option in schoolLevelOptions"
+                                        :key="`${form.school_level}-${option.value}`"
+                                        :value="option.value"
+                                    >
+                                        {{ option.label }}
+                                    </option>
+                                </select>
                                 <InputError class="mt-2" :message="form.errors.class_room" />
                             </div>
+
+                            <div>
+                                <InputLabel
+                                    for="class_room_note"
+                                    value="Nama Kelas / Ruang (Opsional)"
+                                />
+                                <TextInput
+                                    id="class_room_note"
+                                    type="text"
+                                    class="mt-1 block w-full rounded-xl border-slate-300"
+                                    v-model="form.class_room_note"
+                                    placeholder="Contoh: A, B, Curie, Einstein"
+                                />
+                                <InputError
+                                    class="mt-2"
+                                    :message="form.errors.class_room_note"
+                                />
+                            </div>
+                        </div>
+
+                        <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-blue-700">
+                                Jam Kepulangan Otomatis
+                            </p>
+                            <p class="mt-1 text-sm font-semibold text-slate-900">
+                                {{ selectedClassOption?.session_out || '-' }} WIB
+                            </p>
+                            <p class="mt-1 text-xs text-blue-800">
+                                Jam pulang mengikuti kelas yang dipilih agar sesi routing otomatis konsisten.
+                            </p>
                         </div>
                     </div>
 
@@ -315,23 +381,17 @@ const formatDistanceKm = (angka) => {
                                 </label>
                             </div>
 
-                            <div
-                                v-if="form.service_type === 'full' || form.service_type === 'dropoff_only'"
-                            >
+                            <div v-if="form.service_type === 'full' || form.service_type === 'dropoff_only'">
                                 <InputLabel for="session_out" value="Sesi Kepulangan" />
-                                <select
+                                <TextInput
                                     id="session_out"
+                                    type="text"
+                                    class="mt-1 block w-full rounded-xl border-slate-300 bg-slate-50"
                                     v-model="form.session_out"
-                                    class="mt-1 block w-full rounded-xl border-slate-300 focus:border-blue-500 focus:ring-blue-500"
-                                >
-                                    <option value="13:00">Sesi 1 (13:00 WIB)</option>
-                                    <option value="13:30">Sesi 2 (13:30 WIB)</option>
-                                    <option value="14:30">Sesi 3 (14:30 WIB)</option>
-                                    <option value="15:30">Sesi 4 (15:30 WIB)</option>
-                                    <option value="15:45">Sesi 5 (15:45 WIB)</option>
-                                </select>
+                                    readonly
+                                />
                                 <p class="mt-2 text-xs text-slate-500">
-                                    Pilih sesi pulang yang paling mendekati jam selesai sekolah.
+                                    Sesi pulang diisi otomatis dari kelas yang dipilih.
                                 </p>
                             </div>
                         </div>

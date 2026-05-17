@@ -102,25 +102,9 @@ class DatabaseSeeder extends Seeder
         ];
 
         // Proporsi Layanan & Jenjang Sekolah (Weighted Distribution)
-        // 70% Full, 20% Pulang, 10% Pergi
         $services = array_merge(array_fill(0, 70, 'full'), array_fill(0, 20, 'dropoff_only'), array_fill(0, 10, 'pickup_only'));
-        // 50% SD, 40% SMP, 10% TK
         $levels = array_merge(array_fill(0, 50, 'SD'), array_fill(0, 40, 'SMP'), array_fill(0, 10, 'TK'));
-
-        // Proporsi Sesi Pulang: Mayoritas di 14:30 dan 15:30
-        $sessionsOut = [
-            '13:00:00', // Porsi kecil (biasanya TK)
-            '13:30:00',
-            '13:30:00', // Porsi lumayan
-            '14:30:00',
-            '14:30:00',
-            '14:30:00',
-            '14:30:00', // Porsi paling padat (SD/SMP)
-            '15:30:00',
-            '15:30:00',
-            '15:30:00', // Porsi padat kedua
-            '15:45:00' // Porsi kecil (ekskul / telat)
-        ];
+        $scheduleByLevel = config('student_schedule.levels');
 
         /*
         |--------------------------------------------------------------------------
@@ -161,15 +145,20 @@ class DatabaseSeeder extends Seeder
                 // Kalkulasi harga menggunakan logic dari Vue
                 $pricePerMonth = $this->calculatePricing($distanceMeters, $serviceType);
 
+                $schoolLevel = $levels[array_rand($levels)];
+                $classOption = $scheduleByLevel[$schoolLevel][array_rand($scheduleByLevel[$schoolLevel])];
+                $classRoomNote = $schoolLevel === 'TK' ? null : ['A', 'B', 'C'][rand(0, 2)];
+
                 Student::create([
                     'user_id' => $parents[$parentIndex]->id,
-                    'fleet_id' => $fleet->id, // Langsung direlasikan!
+                    'fleet_id' => $fleet->id,
                     'name' => 'Siswa ' . $studentCounter,
-                    'school_level' => $levels[array_rand($levels)],
-                    'class_room' => rand(1, 9) . ['A', 'B', 'C'][rand(0, 2)],
+                    'school_level' => $schoolLevel,
+                    'class_room' => $classOption['value'],
+                    'class_room_note' => $classRoomNote,
                     'service_type' => $serviceType,
                     'session_in' => '06:30:00',
-                    'session_out' => $sessionsOut[array_rand($sessionsOut)],
+                    'session_out' => $classOption['session_out'] . ':00',
                     'address_text' => 'Area ' . str_replace('_', ' ', $driver['zone']),
                     'latitude' => $lat,
                     'longitude' => $lng,

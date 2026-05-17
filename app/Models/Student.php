@@ -12,6 +12,7 @@ class Student extends Model
         'name',
         'school_level',
         'class_room',
+        'class_room_note',
         'service_type',
         'session_in',
         'session_out',

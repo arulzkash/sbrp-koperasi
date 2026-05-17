@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -23,7 +24,9 @@ class RegisteredUserController extends Controller
      */
     public function create(): Response
     {
-        return Inertia::render('Auth/Register');
+        return Inertia::render('Auth/Register', [
+            'classOptions' => config('student_schedule.levels'),
+        ]);
     }
 
     /**
@@ -33,58 +36,71 @@ class RegisteredUserController extends Controller
      */
     public function store(Request $request): RedirectResponse
     {
+        $classOptions = collect(config('student_schedule.levels'));
+        $validLevels = $classOptions->keys()->all();
+        $validClasses = $classOptions
+            ->flatMap(fn (array $options) => collect($options)->pluck('value'))
+            ->unique()
+            ->values()
+            ->all();
+
         $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|lowercase|email|max:255|unique:' . User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
-            // Validasi data siswa (optional/nullable kalau dia daftar tanpa lewat peta)
             'student_name' => 'nullable|string|max:255',
             'latitude' => 'nullable',
             'longitude' => 'nullable',
-            'school_level' => 'required|string',
-            'class_room' => 'required|string|max:50',
-
+            'school_level' => ['nullable', Rule::in($validLevels), 'required_with:student_name,latitude,longitude'],
+            'class_room' => ['nullable', Rule::in($validClasses), 'required_with:student_name,latitude,longitude'],
+            'class_room_note' => 'nullable|string|max:50',
             'service_type' => 'nullable|in:full,pickup_only,dropoff_only',
             'session_in' => 'nullable|date_format:H:i',
             'session_out' => 'nullable|date_format:H:i',
         ]);
 
-        // Pakai Database Transaction biar aman (Kalau gagal satu, gagal semua)
-        DB::transaction(function () use ($request) {
+        $selectedClass = collect($classOptions->get($request->school_level, []))
+            ->firstWhere('value', $request->class_room);
 
-            // 1. Buat User (Orang Tua)
+        if ($request->filled('student_name') && !$selectedClass) {
+            return back()->withErrors([
+                'class_room' => 'Kelas tidak cocok dengan jenjang yang dipilih.',
+            ])->withInput();
+        }
+
+        $resolvedSessionOut = $selectedClass['session_out'] ?? null;
+
+        DB::transaction(function () use ($request, $resolvedSessionOut) {
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
                 'password' => Hash::make($request->password),
-                'role' => 'parent', // Pastikan role-nya Parent
+                'role' => 'parent',
             ]);
 
-            // 2. Jika ada data lokasi, langsung buatkan Data Siswa
             if ($request->latitude && $request->student_name) {
                 Student::create([
-                    'user_id' => $user->id, // Link ke ortu yang barusan dibuat
+                    'user_id' => $user->id,
                     'name' => $request->student_name,
                     'school_level' => $request->school_level ?? 'SD',
                     'class_room' => $request->class_room,
+                    'class_room_note' => $request->class_room_note,
                     'service_type' => $request->service_type ?? 'full',
                     'session_in' => $request->session_in,
-                    'session_out' => $request->session_out,
-                    'address_text' => 'Alamat dari Pin Map', // Nanti bisa diupdate
+                    'session_out' => $resolvedSessionOut,
+                    'address_text' => 'Alamat dari Pin Map',
                     'latitude' => $request->latitude,
                     'longitude' => $request->longitude,
-                    'distance_to_school_meters' => ($request->distance * 1000), // Simpan dalam meter
+                    'distance_to_school_meters' => ($request->distance * 1000),
                     'price_per_month' => $request->price_estimasi,
-                    'status' => 'registered', // Status awal: Registered
-                    'payment_status' => 'unpaid', // Belum bayar
+                    'status' => 'registered',
+                    'payment_status' => 'unpaid',
                 ]);
             }
 
-            // Login otomatis setelah daftar
             Auth::login($user);
         });
 
-        // Redirect ke Dashboard (Nanti kita buat Dashboard Ortu)
         return redirect(route('dashboard', absolute: false));
     }
 }

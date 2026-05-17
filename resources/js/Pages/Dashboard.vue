@@ -16,6 +16,14 @@ const getServiceName = (type) => {
     if (type === 'dropoff_only') return 'Pulang Saja';
     return 'Antar & Jemput (PP)';
 };
+
+const formatClass = (child) => {
+    if (!child.class_room) return '-';
+
+    return child.class_room_note
+        ? `${child.class_room} (${child.class_room_note})`
+        : child.class_room;
+};
 </script>
 
 <template>
@@ -60,7 +68,7 @@ const getServiceName = (type) => {
                                 <h4 class="font-bold text-lg text-gray-800">{{ child.name }}</h4>
                                 <p class="text-xs font-semibold text-gray-600 mt-1">
                                     <span class="bg-gray-200 px-2 py-1 rounded text-gray-700 mr-2">{{ child.school_level }}</span>
-                                    <span class="bg-gray-200 px-2 py-1 rounded text-gray-700 mr-2">Kelas: {{ child.class_room || '-' }}</span>
+                                    <span class="bg-gray-200 px-2 py-1 rounded text-gray-700 mr-2">Kelas: {{ formatClass(child) }}</span>
                                     <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded">{{ getServiceName(child.service_type) }}</span>
                                 </p>
 
