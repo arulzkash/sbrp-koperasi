@@ -4,8 +4,9 @@ import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm, usePage } from '@inertiajs/vue3';
 import { computed, watch } from 'vue';
+import { estimatePricing } from '@/Utils/pricing';
 
 const props = defineProps({
     classOptions: {
@@ -13,7 +14,7 @@ const props = defineProps({
         default: () => ({}),
     },
 });
-
+const page = usePage();
 const params = new URLSearchParams(window.location.search);
 
 const distanceKmParam =
@@ -53,6 +54,34 @@ const selectedClassOption = computed(() => {
     return schoolLevelOptions.value.find((option) => option.value === form.class_room) ?? null;
 });
 
+const estimatedMonthlyPrice = computed(() => {
+    return Number(form.price_estimasi || 0);
+});
+
+const refreshEstimatedPrice = async () => {
+    const baseMonthlyPrice = Number(priceParam || 0);
+
+    if (baseMonthlyPrice > 0) {
+        const pricing = await estimatePricing({
+            base_monthly_price: baseMonthlyPrice,
+            service_type: form.service_type,
+        });
+
+        form.price_estimasi = pricing.servicePrice ?? baseMonthlyPrice;
+        return;
+    }
+
+    const distanceMeters = Number(form.distance || 0) * 1000;
+    const durationMin = (Number(form.distance || 0) / 18) * 60;
+    const pricing = await estimatePricing({
+        distance_meters: distanceMeters,
+        duration_min: durationMin,
+        service_type: form.service_type,
+    });
+
+    form.price_estimasi = pricing.servicePrice ?? 0;
+};
+
 watch(
     () => form.school_level,
     (level) => {
@@ -66,6 +95,14 @@ watch(
     () => form.class_room,
     () => {
         form.session_out = selectedClassOption.value?.session_out ?? '';
+    },
+    { immediate: true },
+);
+
+watch(
+    () => form.service_type,
+    async () => {
+        await refreshEstimatedPrice();
     },
     { immediate: true },
 );
@@ -120,10 +157,10 @@ const formatDistanceKm = (angka) => {
                             <p class="text-[10px] uppercase tracking-wide text-slate-500">
                                 Estimasi
                             </p>
-                            <p class="mt-1 text-sm font-semibold text-slate-900">
-                                {{ formatRupiah(form.price_estimasi) }}
-                            </p>
-                        </div>
+                                <p class="mt-1 text-sm font-semibold text-slate-900">
+                                {{ formatRupiah(estimatedMonthlyPrice) }}
+                                </p>
+                            </div>
                     </div>
 
                     <p class="mt-4 text-xs leading-5 text-blue-800">
@@ -343,6 +380,29 @@ const formatDistanceKm = (angka) => {
                         </div>
 
                         <div class="space-y-4">
+                            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
+                                        Estimasi PP
+                                    </p>
+                                    <p class="mt-1 text-sm font-semibold text-slate-900">
+                                        {{ formatRupiah(estimatedMonthlyPrice) }}
+                                    </p>
+                                </div>
+                                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                    <p class="text-[10px] uppercase tracking-wide text-slate-500">
+                                        Tipe Harga
+                                    </p>
+                                    <p class="mt-1 text-sm font-semibold text-slate-900">
+                                        {{
+                                            form.service_type === 'full'
+                                                ? 'Harga antar-jemput'
+                                                : 'Harga satu arah'
+                                        }}
+                                    </p>
+                                </div>
+                            </div>
+
                             <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
                                 <label class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
                                     <div class="flex items-center gap-2">
@@ -351,8 +411,8 @@ const formatDistanceKm = (angka) => {
                                             v-model="form.service_type"
                                             value="full"
                                             class="text-blue-600 focus:ring-blue-500"
-                                        />
-                                        <span class="font-medium">Antar & Jemput</span>
+                                    />
+                                    <span class="font-medium">Antar & Jemput (PP)</span>
                                     </div>
                                 </label>
 
@@ -364,7 +424,7 @@ const formatDistanceKm = (angka) => {
                                             value="pickup_only"
                                             class="text-blue-600 focus:ring-blue-500"
                                         />
-                                        <span class="font-medium">Berangkat Saja</span>
+                                    <span class="font-medium">Berangkat Saja</span>
                                     </div>
                                 </label>
 
@@ -376,7 +436,7 @@ const formatDistanceKm = (angka) => {
                                             value="dropoff_only"
                                             class="text-blue-600 focus:ring-blue-500"
                                         />
-                                        <span class="font-medium">Pulang Saja</span>
+                                    <span class="font-medium">Pulang Saja</span>
                                     </div>
                                 </label>
                             </div>

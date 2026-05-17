@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use App\Models\User;
 use App\Models\Student;
 use App\Models\Fleet;
+use App\Services\PricingService;
 use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
@@ -15,6 +16,8 @@ class DatabaseSeeder extends Seeder
 
     public function run(): void
     {
+        $pricingService = app(PricingService::class);
+
         /*
         |--------------------------------------------------------------------------
         | 1. USERS (ADMIN & PARENTS)
@@ -142,8 +145,11 @@ class DatabaseSeeder extends Seeder
                 $distanceMeters = $this->haversine($lat, $lng, self::SCHOOL_LAT, self::SCHOOL_LNG) * 1000;
                 $serviceType = $services[array_rand($services)];
 
-                // Kalkulasi harga menggunakan logic dari Vue
-                $pricePerMonth = $this->calculatePricing($distanceMeters, $serviceType);
+                $pricing = $pricingService->calculatePricing($distanceMeters, $this->estimateDurationMin($distanceMeters), 0);
+                $pricePerMonth = $pricingService->calculateServicePrice(
+                    $pricing['monthly_pp'],
+                    $serviceType,
+                );
 
                 $schoolLevel = $levels[array_rand($levels)];
                 $classOption = $scheduleByLevel[$schoolLevel][array_rand($scheduleByLevel[$schoolLevel])];
@@ -174,66 +180,11 @@ class DatabaseSeeder extends Seeder
         }
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | LOGIC TRANSLATION FROM VUE.JS
-    |--------------------------------------------------------------------------
-    */
-
-    private function calculatePricing($distanceMeters, $serviceType)
+    private function estimateDurationMin(float $distanceMeters): float
     {
-        $BASE_MONTHLY_PP = 250000;
-        $RATE_MONTHLY_PER_MINUTE_PP = 1000;
-        $ONE_WAY_RATIO = 0.52;
-        $FALLBACK_SPEED_KMH = 18;
+        $speedKmh = config('pricing.fallback_speed_kmh', 18);
 
-        $distanceKm = $distanceMeters / 1000;
-        // Simulasi durasi karena tidak tembak API OSRM di seeder
-        $durationMin = ($distanceKm / $FALLBACK_SPEED_KMH) * 60;
-
-        $distanceCharge = $this->calculateDistanceCharge($distanceMeters);
-        $durationCharge = $durationMin * $RATE_MONTHLY_PER_MINUTE_PP;
-
-        $monthlyPPRaw = $BASE_MONTHLY_PP + $distanceCharge + $durationCharge;
-
-        // Pembulatan ke atas kelipatan 1000
-        $monthlyPP = ceil($monthlyPPRaw / 1000) * 1000;
-        $monthlyOneWay = ceil(($monthlyPP * $ONE_WAY_RATIO) / 1000) * 1000;
-
-        return ($serviceType === 'full') ? $monthlyPP : $monthlyOneWay;
-    }
-
-    private function calculateDistanceCharge($meters)
-    {
-        $bands = [
-            ['upto' => 1000, 'rate' => 15],
-            ['upto' => 2000, 'rate' => 50],
-            ['upto' => 4000, 'rate' => 55],
-            ['upto' => 10000, 'rate' => 13],
-            ['upto' => INF, 'rate' => 8],
-        ];
-
-        $total = 0;
-        $previousLimit = 0;
-
-        foreach ($bands as $band) {
-            $upperLimit = $band['upto'];
-
-            if ($upperLimit === INF) {
-                $bandMeters = max(0, $meters - $previousLimit);
-            } else {
-                $bandMeters = max(0, min($meters, $upperLimit) - $previousLimit);
-            }
-
-            $total += $bandMeters * $band['rate'];
-            $previousLimit = $upperLimit;
-
-            if ($meters <= $upperLimit) {
-                break;
-            }
-        }
-
-        return $total;
+        return (($distanceMeters / 1000) / $speedKmh) * 60;
     }
 
     private function haversine($lat1, $lon1, $lat2, $lon2)

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\RouteController;
 use App\Http\Controllers\FinanceController;
+use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -46,6 +47,8 @@ Route::get('/dashboard', function () {
         'children' => $children
     ]);
 })->middleware(['auth', 'verified'])->name('dashboard');
+
+Route::post('/pricing/estimate', [PricingController::class, 'estimate'])->name('pricing.estimate');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

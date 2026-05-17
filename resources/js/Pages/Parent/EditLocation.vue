@@ -4,6 +4,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, useForm } from '@inertiajs/vue3';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { estimatePricing } from '@/Utils/pricing';
 
 const props = defineProps({
     student: Object,
@@ -14,23 +15,6 @@ const props = defineProps({
 // =========================
 const SCHOOL_LAT = -6.826864390637824;
 const SCHOOL_LNG = 107.63886429303408;
-
-// =========================
-// KONFIGURASI PRICING
-// =========================
-const BASE_MONTHLY_PP = 250000;
-const RATE_MONTHLY_PER_MINUTE_PP = 1000;
-const ONE_WAY_RATIO = 0.52;
-
-const DISTANCE_BANDS = [
-    { upto: 1000, rate: 15 },
-    { upto: 2000, rate: 50 },
-    { upto: 4000, rate: 55 },
-    { upto: 10000, rate: 13 },
-    { upto: Infinity, rate: 8 },
-];
-
-const FALLBACK_SPEED_KMH = 18;
 
 // =========================
 // FORM DATA
@@ -47,7 +31,7 @@ const form = useForm({
     distance: props.student.distance_to_school_meters / 1000,
 
     price: props.student.price_per_month,
-    one_way_price: Math.round((props.student.price_per_month * 0.52) / 1000) * 1000,
+    one_way_price: props.student.price_per_month,
 });
 
 let map = null;
@@ -78,51 +62,6 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 // =========================
 // PIECEWISE DISTANCE PRICING
 // =========================
-const calculateDistanceCharge = (meters) => {
-    let total = 0;
-    let previousLimit = 0;
-
-    for (const band of DISTANCE_BANDS) {
-        const upperLimit = band.upto;
-
-        const bandMeters =
-            upperLimit === Infinity
-                ? Math.max(0, meters - previousLimit)
-                : Math.max(0, Math.min(meters, upperLimit) - previousLimit);
-
-        total += bandMeters * band.rate;
-
-        previousLimit = upperLimit;
-
-        if (meters <= upperLimit) break;
-    }
-
-    return total;
-};
-
-// =========================
-// PRICING ENGINE
-// =========================
-const calculatePricing = (distanceMeters, durationMin) => {
-    const distanceCharge = calculateDistanceCharge(distanceMeters);
-    const durationCharge = durationMin * RATE_MONTHLY_PER_MINUTE_PP;
-
-    const monthlyPPRaw =
-        BASE_MONTHLY_PP +
-        distanceCharge +
-        durationCharge;
-
-    const monthlyPP = Math.ceil(monthlyPPRaw / 1000) * 1000;
-
-    const monthlyOneWay =
-        Math.ceil((monthlyPP * ONE_WAY_RATIO) / 1000) * 1000;
-
-    return {
-        monthlyPP,
-        monthlyOneWay,
-    };
-};
-
 // =========================
 // UPDATE MAP + PRICING
 // =========================
@@ -150,7 +89,11 @@ const updateMapAndData = async (lat, lng) => {
 
             form.distance = distanceMeters / 1000;
 
-            const pricing = calculatePricing(distanceMeters, durationMin);
+            const pricing = await estimatePricing({
+                distance_meters: distanceMeters,
+                duration_min: durationMin,
+                service_type: 'full',
+            });
 
             form.price = pricing.monthlyPP;
             form.one_way_price = pricing.monthlyOneWay;
@@ -175,11 +118,15 @@ const updateMapAndData = async (lat, lng) => {
 
         const distanceMeters = distanceKm * 1000;
 
-        const durationMin = (distanceKm / FALLBACK_SPEED_KMH) * 60;
+        const durationMin = (distanceKm / 18) * 60;
 
         form.distance = distanceKm;
 
-        const pricing = calculatePricing(distanceMeters, durationMin);
+        const pricing = await estimatePricing({
+            distance_meters: distanceMeters,
+            duration_min: durationMin,
+            service_type: 'full',
+        });
 
         form.price = pricing.monthlyPP;
         form.one_way_price = pricing.monthlyOneWay;
