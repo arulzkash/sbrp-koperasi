@@ -12,6 +12,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withCommands([
         \App\Console\Commands\ImportResearchData::class,
+        \App\Console\Commands\ImportFleetTrips::class,
     ])
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->web(append: [

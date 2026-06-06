@@ -35,4 +35,9 @@ class Fleet extends Model
     {
         return $this->hasMany(Student::class);
     }
+
+    public function trips()
+    {
+        return $this->hasMany(FleetTrip::class);
+    }
 }
