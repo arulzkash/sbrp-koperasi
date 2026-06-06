@@ -24,6 +24,10 @@ const formatClass = (child) => {
         ? `${child.class_room} (${child.class_room_note})`
         : child.class_room;
 };
+
+const formatTime = (time) => {
+    return time ? time.substring(0, 5) : '-';
+};
 </script>
 
 <template>
@@ -152,6 +156,7 @@ const formatClass = (child) => {
                                     <div v-if="child.morning_fleet">
                                         <p class="text-lg font-bold text-gray-800">🚐 {{ child.morning_fleet.name }}</p>
                                         <p class="text-sm text-gray-700 mt-1">Supir: <b>{{ child.morning_fleet.driver_name || '-' }}</b></p>
+                                        <p v-if="child.morning_fleet_trip" class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border mr-2">Trip/Rit: <b>Ke-{{ child.morning_fleet_trip.trip_order }}</b></p>
                                         <p class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border">Estimasi Urutan Jemput: <b>Ke-{{ child.morning_route_order }}</b></p>
                                     </div>
                                     <div v-else class="py-4 text-center">
@@ -160,10 +165,11 @@ const formatClass = (child) => {
                                 </div>
 
                                 <div v-if="['full', 'dropoff_only'].includes(child.service_type)" class="p-4 bg-orange-50 border border-orange-200 rounded-lg">
-                                    <p class="text-xs text-orange-700 font-bold uppercase mb-2">🌙 Armada Pulang (Sesi {{ child.session_out.substring(0, 5) }})</p>
+                                    <p class="text-xs text-orange-700 font-bold uppercase mb-2">🌙 Armada Pulang (Sesi {{ formatTime(child.session_out) }})</p>
                                     <div v-if="child.afternoon_fleet">
                                         <p class="text-lg font-bold text-gray-800">🚐 {{ child.afternoon_fleet.name }}</p>
                                         <p class="text-sm text-gray-700 mt-1">Supir: <b>{{ child.afternoon_fleet.driver_name || '-' }}</b></p>
+                                        <p v-if="child.afternoon_fleet_trip" class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border mr-2">Jam: <b>{{ formatTime(child.afternoon_fleet_trip.departure_time) }}</b> | Trip: <b>Ke-{{ child.afternoon_fleet_trip.trip_order }}</b></p>
                                         <p class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border">Estimasi Urutan Antar: <b>Ke-{{ child.afternoon_route_order }}</b></p>
                                     </div>
                                     <div v-else class="py-4 text-center">

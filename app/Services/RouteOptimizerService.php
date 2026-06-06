@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\Fleet;
+use App\Models\FleetTrip;
 use App\Models\Student;
 
 class RouteOptimizerService
@@ -12,10 +12,13 @@ class RouteOptimizerService
 
     public function optimize()
     {
+        // Clear previous route assignments before calculating a fresh routing result.
         Student::query()->update([
             'morning_fleet_id' => null,
+            'morning_fleet_trip_id' => null,
             'morning_route_order' => null,
             'afternoon_fleet_id' => null,
+            'afternoon_fleet_trip_id' => null,
             'afternoon_route_order' => null,
         ]);
 
@@ -32,86 +35,113 @@ class RouteOptimizerService
 
     /*
     |--------------------------------------------------------------------------
-    | MORNING ROUTE (NEW: DRIVER-CENTRIC BASE)
+    | MORNING ROUTE
     |--------------------------------------------------------------------------
     */
 
     private function optimizeMorningRoutes()
     {
-        $fleets = Fleet::where('is_active', true)->get();
+        // Morning routing uses fleet trips as capacity buckets, not just fleets.
+        $trips = FleetTrip::with('fleet')
+            ->where('direction', 'morning')
+            ->where('is_active', true)
+            ->whereHas('fleet', fn ($query) => $query->where('is_active', true))
+            ->orderBy('departure_time')
+            ->orderBy('fleet_id')
+            ->orderBy('trip_order')
+            ->get();
 
         $students = Student::where('payment_status', 'paid')
             ->whereIn('service_type', ['full', 'pickup_only'])
             ->get();
 
-        if ($fleets->isEmpty() || $students->isEmpty()) return;
+        if ($trips->isEmpty() || $students->isEmpty()) return;
 
-        // 1. CLUSTER: Berdasarkan jarak terdekat ke rumah supir (Base)
-        $fleetStudents = $this->clusterByNearestBase($students, $fleets);
+        // Assign students to the nearest active morning trip base while respecting trip capacity.
+        $tripStudents = $this->clusterByNearestTripBase($students, $trips);
 
-        foreach ($fleetStudents as $fleetId => $studentsForFleet) {
+        foreach ($tripStudents as $tripId => $studentsForTrip) {
+            if (empty($studentsForTrip)) continue;
 
-            if (empty($studentsForFleet)) continue;
+            $trip = $trips->firstWhere('id', $tripId);
+            $fleet = $trip->fleet;
 
-            $fleet = $fleets->firstWhere('id', $fleetId);
-
-            // 2. BUILD ROUTE & OPTIMIZE: Base Supir -> Murid Terdekat -> ... -> Sekolah
-            $route = $this->buildAndOptimizeMorningRoute($studentsForFleet, $fleet);
+            // Build the pickup sequence from driver base to students, ending at school.
+            $route = $this->buildAndOptimizeMorningRoute($studentsForTrip, $fleet);
 
             foreach ($route as $order => $student) {
-                // Bersihkan properti dinamis
-                unset($student->fleet_distances);
+                unset($student->trip_distances);
 
                 $student->update([
                     'morning_fleet_id' => $fleet->id,
-                    'morning_route_order' => $order + 1
+                    'morning_fleet_trip_id' => $trip->id,
+                    'morning_route_order' => $order + 1,
                 ]);
             }
         }
     }
 
-    private function clusterByNearestBase($students, $fleets)
+    private function clusterByNearestTripBase($students, $trips)
     {
-        $fleetStudents = [];
-        $fleetCapacities = [];
-        
-        foreach ($fleets as $fleet) {
-            $fleetStudents[$fleet->id] = [];
-            $fleetCapacities[$fleet->id] = $fleet->capacity;
+        $tripStudents = [];
+        $tripCapacities = [];
+
+        // Each trip has its own copy of the fleet capacity, so a fleet can run multiple batches.
+        foreach ($trips as $trip) {
+            $tripStudents[$trip->id] = [];
+            $tripCapacities[$trip->id] = $trip->fleet->capacity;
         }
 
-        // Hitung jarak setiap murid ke SEMUA base armada
         foreach ($students as $student) {
             $distances = [];
-            foreach ($fleets as $fleet) {
-                $dist = $this->calculateDistance(
-                    $student->latitude, $student->longitude,
-                    $fleet->base_latitude, $fleet->base_longitude
-                );
-                $distances[$fleet->id] = $dist;
+
+            // Score every student against every trip by the trip fleet's driver/base location.
+            foreach ($trips as $trip) {
+                $fleet = $trip->fleet;
+                $distances[] = [
+                    'trip_id' => $trip->id,
+                    'fleet_id' => $fleet->id,
+                    'trip_order' => $trip->trip_order,
+                    'distance' => $this->calculateDistance(
+                        $student->latitude,
+                        $student->longitude,
+                        $fleet->base_latitude,
+                        $fleet->base_longitude,
+                    ),
+                ];
             }
-            // Urutkan fleet dari yang terdekat ke murid tersebut
-            asort($distances);
-            $student->fleet_distances = $distances;
+
+            usort($distances, function ($a, $b) {
+                $byDistance = $a['distance'] <=> $b['distance'];
+                if ($byDistance !== 0) return $byDistance;
+
+                $byFleet = $a['fleet_id'] <=> $b['fleet_id'];
+                if ($byFleet !== 0) return $byFleet;
+
+                return $a['trip_order'] <=> $b['trip_order'];
+            });
+
+            $student->trip_distances = $distances;
         }
 
-        // Assign murid ke armada terdekat yang masih punya kapasitas
         foreach ($students as $student) {
-            foreach ($student->fleet_distances as $fleetId => $dist) {
-                if (count($fleetStudents[$fleetId]) < $fleetCapacities[$fleetId]) {
-                    $fleetStudents[$fleetId][] = $student;
-                    break; // Pindah ke murid selanjutnya
+            foreach ($student->trip_distances as $tripDistance) {
+                $tripId = $tripDistance['trip_id'];
+
+                if (count($tripStudents[$tripId]) < $tripCapacities[$tripId]) {
+                    $tripStudents[$tripId][] = $student;
+                    break;
                 }
             }
         }
 
-        return $fleetStudents;
+        return $tripStudents;
     }
 
-    private function buildAndOptimizeMorningRoute($studentsForFleet, $fleet)
+    private function buildAndOptimizeMorningRoute($studentsForTrip, $fleet)
     {
-        // A. NEAREST NEIGHBOR (Membangun Rute Awal dari Base)
-        $unvisited = $studentsForFleet;
+        // Start with a nearest-neighbor route from the fleet base.
+        $unvisited = $studentsForTrip;
         $route = [];
         $currentLat = $fleet->base_latitude;
         $currentLng = $fleet->base_longitude;
@@ -122,6 +152,7 @@ class RouteOptimizerService
 
             foreach ($unvisited as $index => $student) {
                 $dist = $this->calculateDistance($currentLat, $currentLng, $student->latitude, $student->longitude);
+
                 if ($dist < $minDist) {
                     $minDist = $dist;
                     $nearestIndex = $index;
@@ -130,17 +161,15 @@ class RouteOptimizerService
 
             $nearestStudent = $unvisited[$nearestIndex];
             $route[] = $nearestStudent;
-            
+
             $currentLat = $nearestStudent->latitude;
             $currentLng = $nearestStudent->longitude;
 
             unset($unvisited[$nearestIndex]);
         }
 
-        // B. 2-OPT OPTIMIZATION (Mengunci Titik Start & Finish)
-        $route = $this->twoOptMorning($route, $fleet->base_latitude, $fleet->base_longitude);
-
-        return $route;
+        // Improve local route order while keeping base as start and school as finish.
+        return $this->twoOptMorning($route, $fleet->base_latitude, $fleet->base_longitude);
     }
 
     private function twoOptMorning($route, $baseLat, $baseLng)
@@ -152,15 +181,12 @@ class RouteOptimizerService
 
             for ($i = 0; $i < count($route) - 1; $i++) {
                 for ($j = $i + 1; $j < count($route); $j++) {
-                    
                     $newRoute = $route;
-                    
-                    // Balik urutan segmen di antara i dan j
+
                     $segment = array_slice($newRoute, $i, $j - $i + 1);
                     $segment = array_reverse($segment);
                     array_splice($newRoute, $i, $j - $i + 1, $segment);
 
-                    // Cek jika jarak rute baru lebih pendek
                     if ($this->routeDistanceMorning($newRoute, $baseLat, $baseLng) < $this->routeDistanceMorning($route, $baseLat, $baseLng)) {
                         $route = $newRoute;
                         $improved = true;
@@ -175,63 +201,71 @@ class RouteOptimizerService
     private function routeDistanceMorning($route, $baseLat, $baseLng)
     {
         $distance = 0;
-        
-        // Mulai dari Base Armada
         $prevLat = $baseLat;
         $prevLng = $baseLng;
 
-        // Keliling ke murid-murid
         foreach ($route as $student) {
             $distance += $this->calculateDistance(
-                $prevLat, $prevLng,
-                $student->latitude, $student->longitude
+                $prevLat,
+                $prevLng,
+                $student->latitude,
+                $student->longitude,
             );
             $prevLat = $student->latitude;
             $prevLng = $student->longitude;
         }
 
-        // Titik akhir harus Sekolah
         $distance += $this->calculateDistance(
-            $prevLat, $prevLng,
-            self::SCHOOL_LAT, self::SCHOOL_LNG
+            $prevLat,
+            $prevLng,
+            self::SCHOOL_LAT,
+            self::SCHOOL_LNG,
         );
 
         return $distance;
     }
 
-
     /*
     |--------------------------------------------------------------------------
-    | AFTERNOON ROUTE (LAMA - TIDAK DIUBAH)
+    | AFTERNOON ROUTE
     |--------------------------------------------------------------------------
     */
 
     private function optimizeAfternoonRoutes()
     {
-        $fleets = Fleet::where('is_active', true)->get();
-
         $studentsAll = Student::where('payment_status', 'paid')
             ->whereIn('service_type', ['full', 'dropoff_only'])
             ->get();
 
-        if ($fleets->isEmpty() || $studentsAll->isEmpty()) return;
+        if ($studentsAll->isEmpty()) return;
 
         $groupedBySession = $studentsAll->groupBy('session_out');
 
         foreach ($groupedBySession as $session => $students) {
+            if (!$session) continue;
 
-            // SWEEP ALGORITHM (per session)
-            $fleetStudents = $this->clusterBySweepAndCapacity($students, $fleets);
+            // Afternoon students can only use trips that depart at their exact class dismissal time.
+            $trips = FleetTrip::with('fleet')
+                ->where('direction', 'afternoon')
+                ->where('departure_time', $session)
+                ->where('is_active', true)
+                ->whereHas('fleet', fn ($query) => $query->where('is_active', true))
+                ->orderBy('fleet_id')
+                ->orderBy('trip_order')
+                ->get();
 
-            foreach ($fleetStudents as $fleetId => $studentsForFleet) {
+            if ($trips->isEmpty()) continue;
 
-                if (empty($studentsForFleet)) continue;
+            // Sweep clustering groups nearby drop-off points into the available trips for this time.
+            $tripStudents = $this->clusterBySweepAndTripCapacity($students, $trips);
 
-                $fleet = $fleets->firstWhere('id', $fleetId);
+            foreach ($tripStudents as $tripId => $studentsForTrip) {
+                if (empty($studentsForTrip)) continue;
 
-                // Afternoon: start from school, go to closest first
-                $route = $this->sortRouteByDistance($studentsForFleet, 'asc');
+                $trip = $trips->firstWhere('id', $tripId);
+                $fleet = $trip->fleet;
 
+                $route = $this->sortRouteByDistance($studentsForTrip, 'asc');
                 $route = $this->twoOptImprove($route);
 
                 foreach ($route as $order => $student) {
@@ -240,102 +274,88 @@ class RouteOptimizerService
 
                     $student->update([
                         'afternoon_fleet_id' => $fleet->id,
-                        'afternoon_route_order' => $order + 1
+                        'afternoon_fleet_trip_id' => $trip->id,
+                        'afternoon_route_order' => $order + 1,
                     ]);
                 }
             }
         }
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | SWEEP CLUSTERING (ANGULAR SORT - LAMA)
-    |--------------------------------------------------------------------------
-    */
-
-    private function clusterBySweepAndCapacity($students, $fleets)
+    private function clusterBySweepAndTripCapacity($students, $trips)
     {
-        // 1. Calculate angle from school for each student
         $studentsWithAngles = [];
+
+        // Convert each student location into an angle around the school for sweep clustering.
         foreach ($students as $student) {
             $dy = $student->latitude - self::SCHOOL_LAT;
             $dx = $student->longitude - self::SCHOOL_LNG;
-            // atan2 returns -PI to PI. Convert to 0 to 360 degrees.
             $angle = atan2($dy, $dx) * 180 / M_PI;
+
             if ($angle < 0) {
                 $angle += 360;
             }
+
             $student->sweep_angle = $angle;
             $studentsWithAngles[] = $student;
         }
 
-        // 2. Sort students by angle (Sweep)
         usort($studentsWithAngles, function ($a, $b) {
             return $a->sweep_angle <=> $b->sweep_angle;
         });
 
-        // 3. Fairly distribute capacity
-        // To prevent one fleet having 12 and another 1, we determine a "fair share".
         $totalStudents = count($studentsWithAngles);
-        $totalFleets = count($fleets);
-        $baseShare = floor($totalStudents / $totalFleets);
-        $remainder = $totalStudents % $totalFleets;
+        $totalTrips = count($trips);
+        $baseShare = floor($totalStudents / $totalTrips);
+        $remainder = $totalStudents % $totalTrips;
 
-        $fleetStudents = [];
+        $tripStudents = [];
         $studentIndex = 0;
 
-        foreach ($fleets as $index => $fleet) {
-            $fleetStudents[$fleet->id] = [];
-            
-            // This fleet's quota for this pass
-            $quota = $baseShare + ($index < $remainder ? 1 : 0);
-            
-            // Respect max capacity
-            $quota = min($quota, $fleet->capacity);
+        // Distribute the angular sweep fairly across trips, capped by each trip's fleet capacity.
+        foreach ($trips as $index => $trip) {
+            $tripStudents[$trip->id] = [];
 
-            // Assign students in the current sweep "slice"
+            $quota = $baseShare + ($index < $remainder ? 1 : 0);
+            $quota = min($quota, $trip->fleet->capacity);
+
             for ($i = 0; $i < $quota && $studentIndex < $totalStudents; $i++) {
-                $fleetStudents[$fleet->id][] = $studentsWithAngles[$studentIndex];
+                $tripStudents[$trip->id][] = $studentsWithAngles[$studentIndex];
                 $studentIndex++;
             }
         }
 
-        // If there are leftover students (because some fleets maxed out capacity but others were empty initially)
-        // just greedily assign them to any fleet with remaining capacity.
+        // If fair-share distribution leaves students behind, fill any remaining trip capacity.
         while ($studentIndex < $totalStudents) {
             $assigned = false;
-            foreach ($fleets as $fleet) {
-                if (count($fleetStudents[$fleet->id]) < $fleet->capacity) {
-                    $fleetStudents[$fleet->id][] = $studentsWithAngles[$studentIndex];
+
+            foreach ($trips as $trip) {
+                if (count($tripStudents[$trip->id]) < $trip->fleet->capacity) {
+                    $tripStudents[$trip->id][] = $studentsWithAngles[$studentIndex];
                     $studentIndex++;
                     $assigned = true;
                     break;
                 }
             }
-            // If all fleets are 100% full, the remaining students simply cannot be routed.
+
             if (!$assigned) {
                 break;
             }
         }
 
-        return $fleetStudents;
+        return $tripStudents;
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | ROUTE CONSTRUCTION (LAMA)
-    |--------------------------------------------------------------------------
-    */
 
     private function sortRouteByDistance($students, $direction = 'asc')
     {
         $studentsWithDistance = [];
+
         foreach ($students as $student) {
             $student->school_distance = $this->calculateDistance(
                 self::SCHOOL_LAT,
                 self::SCHOOL_LNG,
                 $student->latitude,
-                $student->longitude
+                $student->longitude,
             );
             $studentsWithDistance[] = $student;
         }
@@ -344,30 +364,22 @@ class RouteOptimizerService
             if ($direction === 'asc') {
                 return $a->school_distance <=> $b->school_distance;
             }
+
             return $b->school_distance <=> $a->school_distance;
         });
 
         return $studentsWithDistance;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | 2-OPT IMPROVEMENT (LAMA - UNTUK SORE)
-    |--------------------------------------------------------------------------
-    */
-
     private function twoOptImprove($route)
     {
         $improved = true;
 
         while ($improved) {
-
             $improved = false;
 
             for ($i = 1; $i < count($route) - 2; $i++) {
-
                 for ($j = $i + 1; $j < count($route); $j++) {
-
                     $newRoute = $route;
 
                     $segment = array_slice($newRoute, $i, $j - $i);
@@ -376,7 +388,6 @@ class RouteOptimizerService
                     array_splice($newRoute, $i, $j - $i, $segment);
 
                     if ($this->routeDistance($newRoute) < $this->routeDistance($route)) {
-
                         $route = $newRoute;
                         $improved = true;
                     }
@@ -390,17 +401,15 @@ class RouteOptimizerService
     private function routeDistance($route)
     {
         $distance = 0;
-
         $prevLat = self::SCHOOL_LAT;
         $prevLng = self::SCHOOL_LNG;
 
         foreach ($route as $student) {
-
             $distance += $this->calculateDistance(
                 $prevLat,
                 $prevLng,
                 $student->latitude,
-                $student->longitude
+                $student->longitude,
             );
 
             $prevLat = $student->latitude;

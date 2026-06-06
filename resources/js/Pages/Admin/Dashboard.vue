@@ -9,6 +9,10 @@ import "leaflet-rotatedmarker";
 // Terima data dari Laravel Controller
 const props = defineProps({
     fleets: Array,
+    fleetTrips: {
+        type: Array,
+        default: () => [],
+    },
     students: Array,
 });
 
@@ -23,7 +27,7 @@ let markersLayer = null; // Layer khusus untuk menampung marker agar mudah dihap
 let vehicleAnimations = [];
 let renderVersion = 0;
 
-const activeFleetId = ref(null);
+const activeTripId = ref(null);
 const animationEnabled = ref(false);
 
 const routeCache = new Map();
@@ -36,6 +40,22 @@ const formatClass = (student) => {
     return student.class_room_note
         ? `${student.class_room} (${student.class_room_note})`
         : student.class_room;
+};
+
+const formatTime = (time) => {
+    return time ? time.substring(0, 5) : "-";
+};
+
+const getTripId = (student) => {
+    return viewMode.value === "morning"
+        ? student.morning_fleet_trip_id
+        : student.afternoon_fleet_trip_id;
+};
+
+const getRouteOrder = (student) => {
+    return viewMode.value === "morning"
+        ? student.morning_route_order
+        : student.afternoon_route_order;
 };
 
 // Daftar warna armada
@@ -58,13 +78,13 @@ const vehicleIcon = L.icon({
 const filteredStudents = computed(() => {
     if (viewMode.value === "morning") {
         return props.students
-            .filter((s) => s.morning_fleet_id !== null)
+            .filter((s) => s.morning_fleet_trip_id !== null)
             .sort((a, b) => a.morning_route_order - b.morning_route_order);
     } else {
         return props.students
             .filter(
                 (s) =>
-                    s.afternoon_fleet_id !== null &&
+                    s.afternoon_fleet_trip_id !== null &&
                     s.session_out === selectedSession.value,
             )
             .sort((a, b) => a.afternoon_route_order - b.afternoon_route_order);
@@ -97,8 +117,8 @@ const routeReadyStudentsCount = computed(() => {
 const routedStudentsCount = computed(() => {
     return routeReadyStudents.value.filter((student) => {
         return viewMode.value === "morning"
-            ? student.morning_fleet_id !== null
-            : student.afternoon_fleet_id !== null;
+            ? student.morning_fleet_trip_id !== null
+            : student.afternoon_fleet_trip_id !== null;
     }).length;
 });
 
@@ -121,23 +141,32 @@ const activeFleetsCount = computed(() => {
     return sidebarData.value.length;
 });
 
-// 2. KELOMPOKKAN KE DALAM ARMADA (Untuk Sidebar & Pembuatan Garis Peta)
+// 2. KELOMPOKKAN KE DALAM TRIP (Untuk Sidebar & Pembuatan Garis Peta)
 const sidebarData = computed(() => {
-    return props.fleets
-        .map((fleet) => {
-            // Cari siswa yang masuk ke armada ini pada sesi yang sedang dipilih
-            const fleetStudents = filteredStudents.value.filter((s) => {
-                return viewMode.value === "morning"
-                    ? s.morning_fleet_id === fleet.id
-                    : s.afternoon_fleet_id === fleet.id;
+    return props.fleetTrips
+        .filter((trip) => {
+            if (viewMode.value === "morning") {
+                return trip.direction === "morning";
+            }
+
+            return (
+                trip.direction === "afternoon" &&
+                trip.departure_time === selectedSession.value
+            );
+        })
+        .map((trip) => {
+            const tripStudents = filteredStudents.value.filter((student) => {
+                return getTripId(student) === trip.id;
             });
 
             return {
-                ...fleet,
-                assigned_students: fleetStudents,
+                ...trip,
+                fleet: trip.fleet,
+                capacity: trip.fleet?.capacity ?? 0,
+                assigned_students: tripStudents,
             };
         })
-        .filter((f) => f.assigned_students.length > 0); // Sembunyikan armada yang nganggur di sesi ini
+        .filter((trip) => trip.assigned_students.length > 0);
 });
 
 // 3. FUNGSI RENDER PETA
@@ -165,12 +194,15 @@ const renderMap = () => {
 
     bounds.push(SCHOOL_COORD);
 
-    const hasActive = activeFleetId.value !== null;
+    const hasActive = activeTripId.value !== null;
 
-    sidebarData.value.forEach((fleet, index) => {
-        if (hasActive && activeFleetId.value !== fleet.id) {
+    sidebarData.value.forEach((trip, index) => {
+        if (hasActive && activeTripId.value !== trip.id) {
             return;
         }
+
+        const fleet = trip.fleet;
+        if (!fleet) return;
 
         const fleetColor = colors[index % colors.length];
 
@@ -211,13 +243,10 @@ const renderMap = () => {
         // SISWA
         // ======================
 
-        fleet.assigned_students.forEach((student) => {
+        trip.assigned_students.forEach((student) => {
             const coord = [student.latitude, student.longitude];
 
-            const order =
-                viewMode.value === "morning"
-                    ? student.morning_route_order
-                    : student.afternoon_route_order;
+            const order = getRouteOrder(student);
 
             routeCoords.push(coord);
             bounds.push(coord);
@@ -262,6 +291,7 @@ const renderMap = () => {
             marker.addTo(markersLayer).bindPopup(`
                 <b>${student.name}</b><br>
                 Armada: ${fleet.name}<br>
+                Trip: ${trip.trip_order}<br>
                 Urutan: ${order}
             `);
         });
@@ -284,7 +314,7 @@ const renderMap = () => {
                 fleetColor,
                 index,
                 currentRender,
-                fleet.id,
+                trip.id,
             );
         }
     });
@@ -339,13 +369,13 @@ const drawRouteWithOSRM = async (
     color,
     fleetindex = 0,
     renderId,
-    fleetId,
+    tripId,
 ) => {
     if (coords.length < 2) return;
 
     const coordString = coords.map((c) => `${c[1]},${c[0]}`).join(";");
-    const hasActive = activeFleetId.value !== null;
-    const isActive = activeFleetId.value === fleetId;
+    const hasActive = activeTripId.value !== null;
+    const isActive = activeTripId.value === tripId;
 
     const drawPolyline = (routePoints) => {
         L.polyline(routePoints, {
@@ -457,18 +487,18 @@ const animateVehicle = (route) => {
     vehicleAnimations.push(interval);
 };
 
-const focusFleet = (fleetId) => {
+const focusTrip = (tripId) => {
     vehicleAnimations.forEach((i) => clearInterval(i));
     vehicleAnimations = [];
     animationEnabled.value = false;
 
-    activeFleetId.value = activeFleetId.value === fleetId ? null : fleetId;
+    activeTripId.value = activeTripId.value === tripId ? null : tripId;
 
     renderMap();
 };
 
 const startAnimation = () => {
-    if (!activeFleetId.value) return;
+    if (!activeTripId.value) return;
 
     vehicleAnimations.forEach((i) => clearInterval(i));
     vehicleAnimations = [];
@@ -486,7 +516,7 @@ watch(
         [studentsOld, modeOld, sessionOld],
     ) => {
         if (modeNow !== modeOld || sessionNow !== sessionOld) {
-            activeFleetId.value = null;
+            activeTripId.value = null;
             animationEnabled.value = false;
             vehicleAnimations.forEach((i) => clearInterval(i));
             vehicleAnimations = [];
@@ -546,7 +576,7 @@ onMounted(() => {
 
                 <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
                     <p class="text-xs font-bold uppercase text-slate-700">
-                        Armada Aktif Di Tampilan
+                        Trip Aktif Di Tampilan
                     </p>
                     <p class="mt-1 text-2xl font-bold text-slate-900">
                         {{ activeFleetsCount }}
@@ -599,7 +629,7 @@ onMounted(() => {
                 <div class="flex flex-col items-end gap-2">
                     <div class="flex items-center gap-3">
                         <button
-                            v-if="activeFleetId"
+                            v-if="activeTripId"
                             @click="startAnimation"
                             class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
                         >
@@ -654,7 +684,7 @@ onMounted(() => {
                         <span v-else>
                             Menampilkan siswa siap dirutekan untuk rute pulang
                             sesi
-                            {{ selectedSession.substring(0, 5) }}: layanan PP
+                            {{ formatTime(selectedSession) }}: layanan PP
                             dan pulang saja.
                         </span>
                     </p>
@@ -689,18 +719,18 @@ onMounted(() => {
                         </p>
                     </div>
 
-                    <!-- FLEET CARD -->
+                    <!-- TRIP CARD -->
                     <div
-                        v-for="(fleet, index) in sidebarData"
-                        :key="fleet.id"
-                        @click="focusFleet(fleet.id)"
+                        v-for="(trip, index) in sidebarData"
+                        :key="trip.id"
+                        @click="focusTrip(trip.id)"
                         class="mb-4 cursor-pointer rounded-lg border p-3 transition-all duration-200"
                         :class="{
                             'bg-yellow-50 border-yellow-300 shadow-sm':
-                                activeFleetId === fleet.id,
+                                activeTripId === trip.id,
 
                             'bg-white border-gray-200 hover:bg-gray-50 hover:border-gray-300 hover:shadow-sm':
-                                activeFleetId !== fleet.id,
+                                activeTripId !== trip.id,
                         }"
                     >
                         <!-- HEADER -->
@@ -715,16 +745,27 @@ onMounted(() => {
                                 ></span>
 
                                 <h3 class="font-semibold text-gray-800">
-                                    🚗 {{ fleet.name }}
+                                    🚗 {{ trip.fleet?.name || "-" }}
                                 </h3>
                             </div>
 
                             <span class="text-xs text-gray-400 font-medium">
-                                {{ fleet.assigned_students.length }}/{{
-                                    fleet.capacity
+                                {{ trip.assigned_students.length }}/{{
+                                    trip.capacity
                                 }}
                             </span>
                         </div>
+
+                        <p class="ml-5 mb-3 text-xs text-gray-500">
+                            Supir: {{ trip.fleet?.driver_name || "-" }} |
+                            <span v-if="viewMode === 'morning'">
+                                Trip {{ trip.trip_order }}
+                            </span>
+                            <span v-else>
+                                {{ formatTime(trip.departure_time) }} · Trip
+                                {{ trip.trip_order }}
+                            </span>
+                        </p>
 
                         <!-- CAPACITY BAR -->
                         <div class="ml-5 mb-3">
@@ -739,8 +780,8 @@ onMounted(() => {
                                     class="h-2 rounded transition-all"
                                     :style="{
                                         width:
-                                            (fleet.assigned_students.length /
-                                                fleet.capacity) *
+                                            (trip.assigned_students.length /
+                                                Math.max(trip.capacity, 1)) *
                                                 100 +
                                             '%',
                                         backgroundColor:
@@ -755,7 +796,7 @@ onMounted(() => {
                             class="list-none pl-6 text-sm space-y-1 relative border-l-2 border-gray-100 ml-2"
                         >
                             <li
-                                v-for="student in fleet.assigned_students"
+                                v-for="student in trip.assigned_students"
                                 :key="student.id"
                                 class="relative pl-4 py-1 rounded"
                             >
@@ -782,8 +823,15 @@ onMounted(() => {
 
                                 <!-- META -->
                                 <p class="text-xs text-gray-500">
-                                    Kls: {{ formatClass(student) }} | Sesi:
-                                    {{ student.session_out.substring(0, 5) }}
+                                    Kls: {{ formatClass(student) }} |
+                                    <span v-if="viewMode === 'morning'">
+                                        Trip: {{ trip.trip_order }}
+                                    </span>
+                                    <span v-else>
+                                        Jam:
+                                        {{ formatTime(student.session_out) }} |
+                                        Trip: {{ trip.trip_order }}
+                                    </span>
                                 </p>
                             </li>
                         </ul>

@@ -39,7 +39,12 @@ Route::get('/dashboard', function () {
         return redirect()->route('finance.students');
     }
 
-    $children = Student::with(['morningFleet', 'afternoonFleet'])
+    $children = Student::with([
+            'morningFleet',
+            'afternoonFleet',
+            'morningFleetTrip',
+            'afternoonFleetTrip',
+        ])
         ->where('user_id', $user->id)
         ->get();
 

@@ -25,8 +25,10 @@ class Student extends Model
         'payment_status',
         'route_order',
         'morning_fleet_id',
+        'morning_fleet_trip_id',
         'morning_route_order',
         'afternoon_fleet_id',
+        'afternoon_fleet_trip_id',
         'afternoon_route_order',
     ];
 
@@ -45,8 +47,18 @@ class Student extends Model
         return $this->belongsTo(Fleet::class, 'morning_fleet_id');
     }
 
+    public function morningFleetTrip()
+    {
+        return $this->belongsTo(FleetTrip::class, 'morning_fleet_trip_id');
+    }
+
     public function afternoonFleet()
     {
         return $this->belongsTo(Fleet::class, 'afternoon_fleet_id');
+    }
+
+    public function afternoonFleetTrip()
+    {
+        return $this->belongsTo(FleetTrip::class, 'afternoon_fleet_trip_id');
     }
 }
