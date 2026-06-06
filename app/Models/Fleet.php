@@ -15,6 +15,7 @@ class Fleet extends Model
         'capacity',
         'base_latitude',
         'base_longitude',
+        'base_address',
         'is_active',
     ];
 
