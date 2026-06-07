@@ -84,6 +84,7 @@ class RouteOptimizerService
         ]);
 
         $tripStudents = $this->improveMorningAssignmentByMove($tripStudents, $trips);
+        $tripStudents = $this->rebalanceMorningUnderfilledTrips($tripStudents, $trips);
 
         // $tripStudents = $this->improveMorningAssignmentBySwap($tripStudents, $trips);
         $this->logOptimizerTime('Morning swap improvement finished', microtime(true), [
@@ -324,6 +325,94 @@ class RouteOptimizerService
         return $tripStudents;
     }
 
+    private function rebalanceMorningUnderfilledTrips(array $tripStudents, $trips): array
+    {
+        $start = microtime(true);
+        $underfilledRatio = 0.65;
+        $overfilledRatio = 0.90;
+        $maxExtraDistanceKm = 1.5;
+        $maxIterations = 20;
+        $iteration = 0;
+        $movesApplied = 0;
+
+        Log::info('[RouteOptimizer] Morning rebalance started', [
+            'trip_loads' => $this->summarizeTripLoads($tripStudents),
+        ]);
+
+        while ($iteration < $maxIterations) {
+            $iteration++;
+            $bestMove = null;
+
+            foreach ($trips as $sourceTrip) {
+                $sourceTripId = $sourceTrip->id;
+                $sourceStudents = $tripStudents[$sourceTripId];
+
+                if ($this->tripLoadRatio($sourceStudents, $sourceTrip->fleet->capacity) <= $overfilledRatio) {
+                    continue;
+                }
+
+                foreach ($trips as $destinationTrip) {
+                    $destinationTripId = $destinationTrip->id;
+                    $destinationStudents = $tripStudents[$destinationTripId];
+
+                    if ($sourceTripId === $destinationTripId
+                        || $this->tripLoadRatio($destinationStudents, $destinationTrip->fleet->capacity) >= $underfilledRatio
+                        || count($destinationStudents) >= $destinationTrip->fleet->capacity
+                    ) {
+                        continue;
+                    }
+
+                    foreach ($sourceStudents as $studentIndex => $student) {
+                        $sourceStudentsAfterMove = $sourceStudents;
+                        array_splice($sourceStudentsAfterMove, $studentIndex, 1);
+
+                        if ($this->tripLoadRatio($sourceStudentsAfterMove, $sourceTrip->fleet->capacity) < $underfilledRatio) {
+                            continue;
+                        }
+
+                        $destinationStudentsAfterMove = [...$destinationStudents, $student];
+                        $before = $this->estimateMorningRouteDistance($sourceStudents, $sourceTrip->fleet)
+                            + $this->estimateMorningRouteDistance($destinationStudents, $destinationTrip->fleet);
+                        $after = $this->estimateMorningRouteDistance($sourceStudentsAfterMove, $sourceTrip->fleet)
+                            + $this->estimateMorningRouteDistance($destinationStudentsAfterMove, $destinationTrip->fleet);
+                        $extraDistance = $after - $before;
+
+                        if ($extraDistance > $maxExtraDistanceKm + self::MORNING_IMPROVEMENT_EPSILON) {
+                            continue;
+                        }
+
+                        if ($bestMove === null || $extraDistance < $bestMove['extra_distance']) {
+                            $bestMove = [
+                                'source_trip_id' => $sourceTripId,
+                                'destination_trip_id' => $destinationTripId,
+                                'source_students' => $sourceStudentsAfterMove,
+                                'destination_students' => $destinationStudentsAfterMove,
+                                'extra_distance' => $extraDistance,
+                            ];
+                        }
+                    }
+                }
+            }
+
+            if ($bestMove === null) {
+                break;
+            }
+
+            // This is a soft business fairness step: accept only small detours, never force equal loads.
+            $tripStudents[$bestMove['source_trip_id']] = $bestMove['source_students'];
+            $tripStudents[$bestMove['destination_trip_id']] = $bestMove['destination_students'];
+            $movesApplied++;
+        }
+
+        $this->logOptimizerTime('Morning rebalance finished', $start, [
+            'iterations' => $iteration,
+            'moves_applied' => $movesApplied,
+            'trip_loads' => $this->summarizeTripLoads($tripStudents),
+        ]);
+
+        return $tripStudents;
+    }
+
     private function improveMorningAssignmentBySwap(array $tripStudents, $trips): array
     {
         $start = microtime(true);
@@ -399,6 +488,15 @@ class RouteOptimizerService
         }
 
         return $summary;
+    }
+
+    private function tripLoadRatio(array $students, int $capacity): float
+    {
+        if ($capacity <= 0) {
+            return 1;
+        }
+
+        return count($students) / $capacity;
     }
 
     private function estimateMorningRouteDistance(array $students, $fleet): float

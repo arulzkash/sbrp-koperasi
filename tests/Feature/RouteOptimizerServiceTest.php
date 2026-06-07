@@ -148,6 +148,113 @@ class RouteOptimizerServiceTest extends TestCase
         $this->assertEqualsWithDelta($baseToSchoolDistance, $estimatedDistance, 0.000001);
     }
 
+    public function test_morning_rebalance_moves_nearby_student_from_overfilled_to_underfilled_trip(): void
+    {
+        $sourceFleet = $this->createFleet(capacity: 4, latitude: -6.82000000, longitude: 107.63000000);
+        $destinationFleet = $this->createFleet(capacity: 4, latitude: -6.82050000, longitude: 107.63050000);
+        $sourceTrip = $this->createTrip($sourceFleet, 'morning', '06:00:00');
+        $destinationTrip = $this->createTrip($destinationFleet, 'morning', '06:00:00');
+        $sourceStudents = [
+            $this->createStudent(['latitude' => -6.82000000, 'longitude' => 107.63000000]),
+            $this->createStudent(['latitude' => -6.82010000, 'longitude' => 107.63010000]),
+            $this->createStudent(['latitude' => -6.82020000, 'longitude' => 107.63020000]),
+            $this->createStudent(['latitude' => -6.82030000, 'longitude' => 107.63030000]),
+        ];
+        $destinationStudents = [
+            $this->createStudent(['latitude' => -6.82060000, 'longitude' => 107.63060000]),
+        ];
+
+        $result = $this->rebalanceMorningTrips([
+            $sourceTrip->id => $sourceStudents,
+            $destinationTrip->id => $destinationStudents,
+        ], collect([$sourceTrip, $destinationTrip]));
+
+        $this->assertCount(3, $result[$sourceTrip->id]);
+        $this->assertCount(2, $result[$destinationTrip->id]);
+    }
+
+    public function test_morning_rebalance_does_not_move_when_extra_distance_is_too_large(): void
+    {
+        $sourceFleet = $this->createFleet(capacity: 4, latitude: -6.82000000, longitude: 107.63000000);
+        $destinationFleet = $this->createFleet(capacity: 4, latitude: -6.90000000, longitude: 107.70000000);
+        $sourceTrip = $this->createTrip($sourceFleet, 'morning', '06:00:00');
+        $destinationTrip = $this->createTrip($destinationFleet, 'morning', '06:00:00');
+        $sourceStudents = [
+            $this->createStudent(['latitude' => -6.82000000, 'longitude' => 107.63000000]),
+            $this->createStudent(['latitude' => -6.82010000, 'longitude' => 107.63010000]),
+            $this->createStudent(['latitude' => -6.82020000, 'longitude' => 107.63020000]),
+            $this->createStudent(['latitude' => -6.82030000, 'longitude' => 107.63030000]),
+        ];
+        $destinationStudents = [
+            $this->createStudent(['latitude' => -6.90000000, 'longitude' => 107.70000000]),
+        ];
+
+        $result = $this->rebalanceMorningTrips([
+            $sourceTrip->id => $sourceStudents,
+            $destinationTrip->id => $destinationStudents,
+        ], collect([$sourceTrip, $destinationTrip]));
+
+        $this->assertCount(4, $result[$sourceTrip->id]);
+        $this->assertCount(1, $result[$destinationTrip->id]);
+    }
+
+    public function test_morning_rebalance_does_not_exceed_destination_capacity(): void
+    {
+        $sourceFleet = $this->createFleet(capacity: 4, latitude: -6.82000000, longitude: 107.63000000);
+        $destinationFleet = $this->createFleet(capacity: 1, latitude: -6.82050000, longitude: 107.63050000);
+        $sourceTrip = $this->createTrip($sourceFleet, 'morning', '06:00:00');
+        $destinationTrip = $this->createTrip($destinationFleet, 'morning', '06:00:00');
+        $sourceStudents = [
+            $this->createStudent(['latitude' => -6.82000000, 'longitude' => 107.63000000]),
+            $this->createStudent(['latitude' => -6.82010000, 'longitude' => 107.63010000]),
+            $this->createStudent(['latitude' => -6.82020000, 'longitude' => 107.63020000]),
+            $this->createStudent(['latitude' => -6.82030000, 'longitude' => 107.63030000]),
+        ];
+        $destinationStudents = [
+            $this->createStudent(['latitude' => -6.82060000, 'longitude' => 107.63060000]),
+        ];
+
+        $result = $this->rebalanceMorningTrips([
+            $sourceTrip->id => $sourceStudents,
+            $destinationTrip->id => $destinationStudents,
+        ], collect([$sourceTrip, $destinationTrip]));
+
+        $this->assertCount(4, $result[$sourceTrip->id]);
+        $this->assertCount(1, $result[$destinationTrip->id]);
+    }
+
+    public function test_morning_rebalance_does_not_make_source_trip_underfilled(): void
+    {
+        $sourceFleet = $this->createFleet(capacity: 2, latitude: -6.82000000, longitude: 107.63000000);
+        $destinationFleet = $this->createFleet(capacity: 4, latitude: -6.82050000, longitude: 107.63050000);
+        $sourceTrip = $this->createTrip($sourceFleet, 'morning', '06:00:00');
+        $destinationTrip = $this->createTrip($destinationFleet, 'morning', '06:00:00');
+        $sourceStudents = [
+            $this->createStudent(['latitude' => -6.82000000, 'longitude' => 107.63000000]),
+            $this->createStudent(['latitude' => -6.82010000, 'longitude' => 107.63010000]),
+        ];
+        $destinationStudents = [
+            $this->createStudent(['latitude' => -6.82060000, 'longitude' => 107.63060000]),
+        ];
+
+        $result = $this->rebalanceMorningTrips([
+            $sourceTrip->id => $sourceStudents,
+            $destinationTrip->id => $destinationStudents,
+        ], collect([$sourceTrip, $destinationTrip]));
+
+        $this->assertCount(2, $result[$sourceTrip->id]);
+        $this->assertCount(1, $result[$destinationTrip->id]);
+    }
+
+    private function rebalanceMorningTrips(array $tripStudents, $trips): array
+    {
+        $service = app(RouteOptimizerService::class);
+        $reflection = new ReflectionClass($service);
+        $rebalance = $reflection->getMethod('rebalanceMorningUnderfilledTrips');
+
+        return $rebalance->invoke($service, $tripStudents, $trips);
+    }
+
     private function createFleet(
         int $capacity,
         float $latitude = -6.82000000,
