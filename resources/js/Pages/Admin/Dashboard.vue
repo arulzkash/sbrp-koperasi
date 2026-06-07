@@ -179,6 +179,26 @@ const generateProgressPercent = computed(() => {
     return ((currentGenerateStepIndex.value + 1) / generateSteps.length) * 100;
 });
 
+const coordinateKey = (lat, lng) => {
+    return `${Number(lat).toFixed(7)},${Number(lng).toFixed(7)}`;
+};
+
+const getMarkerDisplayCoord = (coord, duplicateIndex) => {
+    if (duplicateIndex === 0) {
+        return coord;
+    }
+
+    // Keep route geometry exact; only spread overlapping markers visually on the map.
+    const radiusMeters = 8 + Math.floor((duplicateIndex - 1) / 8) * 4;
+    const angle = ((duplicateIndex - 1) % 8) * (Math.PI / 4);
+    const latOffset = (Math.sin(angle) * radiusMeters) / 111320;
+    const lngOffset =
+        (Math.cos(angle) * radiusMeters) /
+        (111320 * Math.cos((coord[0] * Math.PI) / 180));
+
+    return [coord[0] + latOffset, coord[1] + lngOffset];
+};
+
 // 2. KELOMPOKKAN KE DALAM TRIP (Untuk Sidebar & Pembuatan Garis Peta)
 const sidebarData = computed(() => {
     return props.fleetTrips
@@ -233,6 +253,7 @@ const renderMap = () => {
     bounds.push(SCHOOL_COORD);
 
     const hasActive = activeTripId.value !== null;
+    const renderedCoordinateCounts = new Map();
 
     sidebarData.value.forEach((trip, index) => {
         if (hasActive && activeTripId.value !== trip.id) {
@@ -283,6 +304,10 @@ const renderMap = () => {
 
         trip.assigned_students.forEach((student) => {
             const coord = [student.latitude, student.longitude];
+            const key = coordinateKey(student.latitude, student.longitude);
+            const duplicateIndex = renderedCoordinateCounts.get(key) ?? 0;
+            renderedCoordinateCounts.set(key, duplicateIndex + 1);
+            const displayCoord = getMarkerDisplayCoord(coord, duplicateIndex);
 
             const order = getRouteOrder(student);
 
@@ -316,7 +341,7 @@ const renderMap = () => {
                         opacity:0.9;
                     "></div>`;
 
-            const marker = L.marker(coord, {
+            const marker = L.marker(displayCoord, {
                 icon: L.divIcon({
                     html: iconHtml,
                     className:
