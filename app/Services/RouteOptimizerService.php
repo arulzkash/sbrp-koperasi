@@ -668,6 +668,8 @@ class RouteOptimizerService
                 continue;
             }
 
+            $sessionStart = microtime(true);
+
             // Afternoon students can only use trips that depart at their exact class dismissal time.
             $trips = FleetTrip::with('fleet')
                 ->where('direction', 'afternoon')
@@ -678,12 +680,33 @@ class RouteOptimizerService
                 ->orderBy('trip_order')
                 ->get();
 
+            Log::info('[RouteOptimizer] Afternoon optimizer session started', [
+                'session' => $session,
+                'total_trips' => $trips->count(),
+                'total_students' => $students->count(),
+            ]);
+
             if ($trips->isEmpty()) {
+                $this->logOptimizerTime('Afternoon session finished', $sessionStart, [
+                    'session' => $session,
+                    'total_assigned_students' => 0,
+                ]);
+
                 continue;
             }
 
-            // Sweep clustering groups nearby drop-off points into the available trips for this time.
-            $tripStudents = $this->clusterBySweepAndTripCapacity($students, $trips);
+            $clusterStart = microtime(true);
+            $tripStudents = $this->clusterAfternoonByInsertionCost($students, $trips);
+            $assignedStudentsCount = array_sum($this->summarizeTripLoads($tripStudents));
+            $this->logOptimizerTime('Afternoon clustering finished', $clusterStart, [
+                'session' => $session,
+                'assigned_students_count' => $assignedStudentsCount,
+                'unassigned_count' => max($students->count() - $assignedStudentsCount, 0),
+                'trip_loads' => $this->summarizeTripLoads($tripStudents),
+            ]);
+
+            $tripStudents = $this->improveAfternoonAssignmentByMove($tripStudents, $trips, $session);
+            $tripStudents = $this->rebalanceAfternoonUnderfilledTrips($tripStudents, $trips, $session);
 
             foreach ($tripStudents as $tripId => $studentsForTrip) {
                 if (empty($studentsForTrip)) {
@@ -693,9 +716,16 @@ class RouteOptimizerService
                 $trip = $trips->firstWhere('id', $tripId);
                 $fleet = $trip->fleet;
 
-                $route = $this->sortRouteByDistance($studentsForTrip, 'asc');
-                $route = $this->twoOptImprove($route);
+                $orderingStart = microtime(true);
+                $route = $this->buildAndOptimizeAfternoonRoute($studentsForTrip);
+                $this->logOptimizerTime('Afternoon final route ordering finished', $orderingStart, [
+                    'session' => $session,
+                    'trip_id' => $trip->id,
+                    'fleet_id' => $fleet->id,
+                    'student_count' => count($route),
+                ]);
 
+                $savingStart = microtime(true);
                 foreach ($route as $order => $student) {
                     unset($student->sweep_angle);
                     unset($student->school_distance);
@@ -706,8 +736,321 @@ class RouteOptimizerService
                         'afternoon_route_order' => $order + 1,
                     ]);
                 }
+                $this->logOptimizerTime('Afternoon trip assignment saving finished', $savingStart, [
+                    'session' => $session,
+                    'trip_id' => $trip->id,
+                    'fleet_id' => $fleet->id,
+                    'student_count' => count($route),
+                ]);
+            }
+
+            $this->logOptimizerTime('Afternoon session finished', $sessionStart, [
+                'session' => $session,
+                'total_assigned_students' => array_sum($this->summarizeTripLoads($tripStudents)),
+            ]);
+        }
+    }
+
+    private function clusterAfternoonByInsertionCost($students, $trips): array
+    {
+        $tripStudents = [];
+        $tripCapacities = [];
+        $validStudents = [];
+
+        foreach ($trips as $trip) {
+            $tripStudents[$trip->id] = [];
+            $tripCapacities[$trip->id] = $trip->fleet->capacity;
+        }
+
+        foreach ($students as $student) {
+            if (! $this->hasValidCoordinates($student)) {
+                continue;
+            }
+
+            $student->school_distance = $this->calculateDistance(
+                self::SCHOOL_LAT,
+                self::SCHOOL_LNG,
+                $student->latitude,
+                $student->longitude,
+            );
+            $validStudents[] = $student;
+        }
+
+        usort($validStudents, function ($a, $b) {
+            return $b->school_distance <=> $a->school_distance;
+        });
+
+        foreach ($validStudents as $student) {
+            $bestTripId = null;
+            $bestScore = INF;
+
+            foreach ($trips as $trip) {
+                $tripId = $trip->id;
+
+                if (count($tripStudents[$tripId]) >= $tripCapacities[$tripId]) {
+                    continue;
+                }
+
+                $currentStudents = $tripStudents[$tripId];
+                $currentDistance = $this->estimateAfternoonRouteDistance($currentStudents);
+                $newDistance = $this->estimateAfternoonRouteDistance([...$currentStudents, $student]);
+                $insertionCost = $newDistance - $currentDistance;
+
+                // Capacity balance is a soft nudge only; route geography remains the primary score.
+                $loadRatio = $tripCapacities[$tripId] > 0
+                    ? count($currentStudents) / $tripCapacities[$tripId]
+                    : 1;
+                $capacityPenalty = $loadRatio * 0.3;
+                $outlierPenalty = $this->calculateDistanceToTripCentroid($student, $currentStudents) * 0.15;
+                $score = $insertionCost + $capacityPenalty + $outlierPenalty;
+
+                if ($score < $bestScore) {
+                    $bestScore = $score;
+                    $bestTripId = $tripId;
+                }
+            }
+
+            if ($bestTripId !== null) {
+                $tripStudents[$bestTripId][] = $student;
             }
         }
+
+        foreach ($validStudents as $student) {
+            unset($student->school_distance);
+        }
+
+        return $tripStudents;
+    }
+
+    private function improveAfternoonAssignmentByMove(array $tripStudents, $trips, $session = null): array
+    {
+        $start = microtime(true);
+        $maxIterations = 5;
+        $iteration = 0;
+        $improved = true;
+        $movesApplied = 0;
+
+        while ($improved && $iteration < $maxIterations) {
+            $improved = false;
+            $iteration++;
+
+            foreach ($trips as $fromTrip) {
+                $fromTripId = $fromTrip->id;
+
+                foreach ($tripStudents[$fromTripId] as $studentIndex => $student) {
+                    foreach ($trips as $toTrip) {
+                        $toTripId = $toTrip->id;
+
+                        if ($fromTripId === $toTripId || count($tripStudents[$toTripId]) >= $toTrip->fleet->capacity) {
+                            continue;
+                        }
+
+                        $fromStudentsAfterMove = $tripStudents[$fromTripId];
+                        array_splice($fromStudentsAfterMove, $studentIndex, 1);
+                        $toStudentsAfterMove = [...$tripStudents[$toTripId], $student];
+
+                        $before = $this->estimateAfternoonRouteDistance($tripStudents[$fromTripId])
+                            + $this->estimateAfternoonRouteDistance($tripStudents[$toTripId]);
+                        $after = $this->estimateAfternoonRouteDistance($fromStudentsAfterMove)
+                            + $this->estimateAfternoonRouteDistance($toStudentsAfterMove);
+
+                        if ($after + self::MORNING_IMPROVEMENT_EPSILON < $before) {
+                            $tripStudents[$fromTripId] = $fromStudentsAfterMove;
+                            $tripStudents[$toTripId] = $toStudentsAfterMove;
+                            $improved = true;
+                            $movesApplied++;
+
+                            continue 4;
+                        }
+                    }
+                }
+            }
+        }
+
+        $this->logOptimizerTime('Afternoon move improvement finished', $start, [
+            'session' => $session,
+            'iterations' => $iteration,
+            'moves_applied' => $movesApplied,
+            'trip_loads' => $this->summarizeTripLoads($tripStudents),
+        ]);
+
+        return $tripStudents;
+    }
+
+    private function rebalanceAfternoonUnderfilledTrips(array $tripStudents, $trips, $session = null): array
+    {
+        $start = microtime(true);
+        $underfilledRatio = 0.65;
+        $overfilledRatio = 0.90;
+        $maxExtraDistanceKm = 2.0;
+        $maxIterations = 10;
+        $iteration = 0;
+        $movesApplied = 0;
+
+        while ($iteration < $maxIterations) {
+            $iteration++;
+            $bestMove = null;
+
+            foreach ($trips as $sourceTrip) {
+                $sourceTripId = $sourceTrip->id;
+                $sourceStudents = $tripStudents[$sourceTripId];
+
+                if ($this->tripLoadRatio($sourceStudents, $sourceTrip->fleet->capacity) <= $overfilledRatio) {
+                    continue;
+                }
+
+                foreach ($trips as $destinationTrip) {
+                    $destinationTripId = $destinationTrip->id;
+                    $destinationStudents = $tripStudents[$destinationTripId];
+
+                    if ($sourceTripId === $destinationTripId
+                        || $this->tripLoadRatio($destinationStudents, $destinationTrip->fleet->capacity) >= $underfilledRatio
+                        || count($destinationStudents) >= $destinationTrip->fleet->capacity
+                    ) {
+                        continue;
+                    }
+
+                    foreach ($sourceStudents as $studentIndex => $student) {
+                        $sourceStudentsAfterMove = $sourceStudents;
+                        array_splice($sourceStudentsAfterMove, $studentIndex, 1);
+
+                        if ($this->tripLoadRatio($sourceStudentsAfterMove, $sourceTrip->fleet->capacity) < $underfilledRatio) {
+                            continue;
+                        }
+
+                        $destinationStudentsAfterMove = [...$destinationStudents, $student];
+                        $before = $this->estimateAfternoonRouteDistance($sourceStudents)
+                            + $this->estimateAfternoonRouteDistance($destinationStudents);
+                        $after = $this->estimateAfternoonRouteDistance($sourceStudentsAfterMove)
+                            + $this->estimateAfternoonRouteDistance($destinationStudentsAfterMove);
+                        $extraDistance = $after - $before;
+
+                        if ($extraDistance > $maxExtraDistanceKm + self::MORNING_IMPROVEMENT_EPSILON) {
+                            continue;
+                        }
+
+                        if ($bestMove === null || $extraDistance < $bestMove['extra_distance']) {
+                            $bestMove = [
+                                'source_trip_id' => $sourceTripId,
+                                'destination_trip_id' => $destinationTripId,
+                                'source_students' => $sourceStudentsAfterMove,
+                                'destination_students' => $destinationStudentsAfterMove,
+                                'extra_distance' => $extraDistance,
+                            ];
+                        }
+                    }
+                }
+            }
+
+            if ($bestMove === null) {
+                break;
+            }
+
+            // Soft business rebalance: accept small detours, but never force equal afternoon loads.
+            $tripStudents[$bestMove['source_trip_id']] = $bestMove['source_students'];
+            $tripStudents[$bestMove['destination_trip_id']] = $bestMove['destination_students'];
+            $movesApplied++;
+        }
+
+        $this->logOptimizerTime('Afternoon rebalance finished', $start, [
+            'session' => $session,
+            'iterations' => $iteration,
+            'moves_applied' => $movesApplied,
+            'trip_loads' => $this->summarizeTripLoads($tripStudents),
+        ]);
+
+        return $tripStudents;
+    }
+
+    private function estimateAfternoonRouteDistance(array $students): float
+    {
+        $route = $this->buildNearestNeighborAfternoonRoute($students);
+
+        return $this->routeDistanceAfternoon($route);
+    }
+
+    private function buildNearestNeighborAfternoonRoute(array $students): array
+    {
+        $unvisited = array_values($students);
+        $route = [];
+        $currentLat = self::SCHOOL_LAT;
+        $currentLng = self::SCHOOL_LNG;
+
+        while (! empty($unvisited)) {
+            $nearestIndex = -1;
+            $minDist = INF;
+
+            foreach ($unvisited as $index => $student) {
+                $dist = $this->calculateDistance($currentLat, $currentLng, $student->latitude, $student->longitude);
+
+                if ($dist < $minDist) {
+                    $minDist = $dist;
+                    $nearestIndex = $index;
+                }
+            }
+
+            $nearestStudent = $unvisited[$nearestIndex];
+            $route[] = $nearestStudent;
+            $currentLat = $nearestStudent->latitude;
+            $currentLng = $nearestStudent->longitude;
+
+            array_splice($unvisited, $nearestIndex, 1);
+        }
+
+        return $route;
+    }
+
+    private function routeDistanceAfternoon(array $route): float
+    {
+        $distance = 0;
+        $prevLat = self::SCHOOL_LAT;
+        $prevLng = self::SCHOOL_LNG;
+
+        foreach ($route as $student) {
+            $distance += $this->calculateDistance(
+                $prevLat,
+                $prevLng,
+                $student->latitude,
+                $student->longitude,
+            );
+
+            $prevLat = $student->latitude;
+            $prevLng = $student->longitude;
+        }
+
+        return $distance;
+    }
+
+    private function buildAndOptimizeAfternoonRoute($studentsForTrip): array
+    {
+        $route = $this->buildNearestNeighborAfternoonRoute($studentsForTrip);
+
+        return $this->twoOptAfternoon($route);
+    }
+
+    private function twoOptAfternoon(array $route): array
+    {
+        $improved = true;
+
+        while ($improved) {
+            $improved = false;
+
+            for ($i = 0; $i < count($route) - 1; $i++) {
+                for ($j = $i + 1; $j < count($route); $j++) {
+                    $newRoute = $route;
+                    $segment = array_slice($newRoute, $i, $j - $i + 1);
+                    $segment = array_reverse($segment);
+                    array_splice($newRoute, $i, $j - $i + 1, $segment);
+
+                    if ($this->routeDistanceAfternoon($newRoute) < $this->routeDistanceAfternoon($route)) {
+                        $route = $newRoute;
+                        $improved = true;
+                    }
+                }
+            }
+        }
+
+        return $route;
     }
 
     private function clusterBySweepAndTripCapacity($students, $trips)

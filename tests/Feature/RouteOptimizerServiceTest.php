@@ -124,6 +124,143 @@ class RouteOptimizerServiceTest extends TestCase
         $this->assertSame(1, $student->afternoon_route_order);
     }
 
+    public function test_afternoon_optimizer_assigns_full_and_dropoff_only_students_to_matching_session_trips(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $trip = $this->createTrip($fleet, 'afternoon', '13:30:00');
+        $fullStudent = $this->createStudent([
+            'service_type' => 'full',
+            'session_out' => '13:30:00',
+            'latitude' => -6.82000000,
+            'longitude' => 107.63000000,
+        ]);
+        $dropoffOnlyStudent = $this->createStudent([
+            'service_type' => 'dropoff_only',
+            'session_out' => '13:30:00',
+            'latitude' => -6.82100000,
+            'longitude' => 107.63100000,
+        ]);
+
+        app(RouteOptimizerService::class)->optimize();
+
+        $fullStudent->refresh();
+        $dropoffOnlyStudent->refresh();
+
+        $this->assertSame($trip->id, $fullStudent->afternoon_fleet_trip_id);
+        $this->assertSame($trip->id, $dropoffOnlyStudent->afternoon_fleet_trip_id);
+    }
+
+    public function test_afternoon_optimizer_does_not_assign_pickup_only_students(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $this->createTrip($fleet, 'afternoon', '13:00:00');
+        $student = $this->createStudent([
+            'service_type' => 'pickup_only',
+            'session_out' => '13:00:00',
+            'latitude' => -6.82000000,
+            'longitude' => 107.63000000,
+        ]);
+
+        app(RouteOptimizerService::class)->optimize();
+
+        $student->refresh();
+
+        $this->assertNull($student->afternoon_fleet_id);
+        $this->assertNull($student->afternoon_fleet_trip_id);
+        $this->assertNull($student->afternoon_route_order);
+    }
+
+    public function test_afternoon_optimizer_does_not_assign_students_to_different_departure_time(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $this->createTrip($fleet, 'afternoon', '14:30:00');
+        $student = $this->createStudent([
+            'service_type' => 'dropoff_only',
+            'session_out' => '13:00:00',
+            'latitude' => -6.82000000,
+            'longitude' => 107.63000000,
+        ]);
+
+        app(RouteOptimizerService::class)->optimize();
+
+        $student->refresh();
+
+        $this->assertNull($student->afternoon_fleet_id);
+        $this->assertNull($student->afternoon_fleet_trip_id);
+    }
+
+    public function test_afternoon_optimizer_respects_capacity_and_leaves_overflow_unassigned(): void
+    {
+        $fleet = $this->createFleet(capacity: 1);
+        $trip = $this->createTrip($fleet, 'afternoon', '13:00:00');
+
+        $this->createStudent(['service_type' => 'dropoff_only', 'session_out' => '13:00:00', 'latitude' => -6.82000000, 'longitude' => 107.63000000]);
+        $this->createStudent(['service_type' => 'dropoff_only', 'session_out' => '13:00:00', 'latitude' => -6.82100000, 'longitude' => 107.63100000]);
+        $this->createStudent(['service_type' => 'dropoff_only', 'session_out' => '13:00:00', 'latitude' => -6.82200000, 'longitude' => 107.63200000]);
+
+        app(RouteOptimizerService::class)->optimize();
+
+        $this->assertSame(1, Student::where('afternoon_fleet_trip_id', $trip->id)->count());
+        $this->assertSame(2, Student::whereNull('afternoon_fleet_trip_id')->count());
+    }
+
+    public function test_afternoon_optimizer_leaves_invalid_coordinate_students_unassigned(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $this->createTrip($fleet, 'afternoon', '13:00:00');
+        $student = $this->createStudent([
+            'service_type' => 'dropoff_only',
+            'session_out' => '13:00:00',
+            'latitude' => 120,
+            'longitude' => 107.63000000,
+        ]);
+
+        app(RouteOptimizerService::class)->optimize();
+
+        $student->refresh();
+
+        $this->assertNull($student->afternoon_fleet_id);
+        $this->assertNull($student->afternoon_fleet_trip_id);
+    }
+
+    public function test_afternoon_insertion_cost_keeps_far_outlier_separate_from_coherent_route(): void
+    {
+        $firstFleet = $this->createFleet(capacity: 3);
+        $secondFleet = $this->createFleet(capacity: 3);
+        $firstTrip = $this->createTrip($firstFleet, 'afternoon', '13:00:00');
+        $secondTrip = $this->createTrip($secondFleet, 'afternoon', '13:00:00');
+
+        $westOutlier = $this->createStudent([
+            'service_type' => 'dropoff_only',
+            'session_out' => '13:00:00',
+            'latitude' => -6.82680000,
+            'longitude' => 107.56000000,
+        ]);
+        $eastStudentOne = $this->createStudent([
+            'service_type' => 'dropoff_only',
+            'session_out' => '13:00:00',
+            'latitude' => -6.82690000,
+            'longitude' => 107.68000000,
+        ]);
+        $eastStudentTwo = $this->createStudent([
+            'service_type' => 'dropoff_only',
+            'session_out' => '13:00:00',
+            'latitude' => -6.82710000,
+            'longitude' => 107.68100000,
+        ]);
+
+        app(RouteOptimizerService::class)->optimize();
+
+        $westOutlier->refresh();
+        $eastStudentOne->refresh();
+        $eastStudentTwo->refresh();
+
+        $this->assertNotNull($westOutlier->afternoon_fleet_trip_id);
+        $this->assertContains($westOutlier->afternoon_fleet_trip_id, [$firstTrip->id, $secondTrip->id]);
+        $this->assertSame($eastStudentOne->afternoon_fleet_trip_id, $eastStudentTwo->afternoon_fleet_trip_id);
+        $this->assertNotSame($westOutlier->afternoon_fleet_trip_id, $eastStudentOne->afternoon_fleet_trip_id);
+    }
+
     public function test_morning_distance_estimation_includes_final_leg_to_school(): void
     {
         $service = app(RouteOptimizerService::class);
