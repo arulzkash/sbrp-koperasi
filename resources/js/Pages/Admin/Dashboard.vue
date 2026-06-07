@@ -175,6 +175,10 @@ const visibleGenerateSteps = computed(() => {
     return generateSteps.slice(0, currentGenerateStepIndex.value + 1);
 });
 
+const generateProgressPercent = computed(() => {
+    return ((currentGenerateStepIndex.value + 1) / generateSteps.length) * 100;
+});
+
 // 2. KELOMPOKKAN KE DALAM TRIP (Untuk Sidebar & Pembuatan Garis Peta)
 const sidebarData = computed(() => {
     return props.fleetTrips
@@ -750,17 +754,28 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
 
-                    <div
-                        v-if="isGenerating || generateStatus !== 'idle'"
-                        class="w-full max-w-sm rounded-lg border bg-white p-3 text-left shadow-sm"
-                        :class="{
-                            'border-blue-200': generateStatus === 'running',
-                            'border-green-200 bg-green-50':
-                                generateStatus === 'success',
-                            'border-red-200 bg-red-50':
-                                generateStatus === 'error',
-                        }"
+                    <p
+                        class="text-[11px] text-right text-blue-700 max-w-xs leading-4"
                     >
+                        Generate memproses siswa yang sudah lunas dan sesuai
+                        mode layanan serta sesi pulang.
+                    </p>
+                </div>
+            </div>
+
+            <div
+                v-if="isGenerating || generateStatus !== 'idle'"
+                class="mb-4 rounded-lg border p-4 shadow-sm"
+                :class="{
+                    'border-blue-200 bg-white': generateStatus === 'running',
+                    'border-green-200 bg-green-50': generateStatus === 'success',
+                    'border-red-200 bg-red-50': generateStatus === 'error',
+                }"
+            >
+                <div
+                    class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"
+                >
+                    <div>
                         <p
                             class="text-xs font-bold uppercase"
                             :class="{
@@ -771,7 +786,6 @@ onBeforeUnmount(() => {
                         >
                             Status Generate
                         </p>
-
                         <p
                             class="mt-1 text-sm font-semibold"
                             :class="{
@@ -782,49 +796,57 @@ onBeforeUnmount(() => {
                         >
                             {{ currentGenerateStep }}
                         </p>
-
                         <p
                             v-if="showLongGenerateMessage"
                             class="mt-1 text-xs text-blue-700"
                         >
                             Proses masih berjalan, mohon tunggu...
                         </p>
-
-                        <ol
-                            v-if="generateStatus === 'running'"
-                            class="mt-2 space-y-1 text-xs text-gray-600"
-                        >
-                            <li
-                                v-for="(step, index) in visibleGenerateSteps"
-                                :key="step"
-                                class="flex items-start gap-2"
-                            >
-                                <span
-                                    class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
-                                    :class="
-                                        index < currentGenerateStepIndex
-                                            ? 'bg-green-100 text-green-700'
-                                            : 'bg-blue-100 text-blue-700'
-                                    "
-                                >
-                                    {{
-                                        index < currentGenerateStepIndex
-                                            ? "✓"
-                                            : index + 1
-                                    }}
-                                </span>
-                                <span>{{ step }}</span>
-                            </li>
-                        </ol>
                     </div>
 
-                    <p
-                        class="text-[11px] text-right text-blue-700 max-w-xs leading-4"
+                    <div
+                        v-if="generateStatus === 'running'"
+                        class="w-full md:w-72"
                     >
-                        Generate memproses siswa yang sudah lunas dan sesuai
-                        mode layanan serta sesi pulang.
-                    </p>
+                        <div class="h-2 overflow-hidden rounded bg-blue-100">
+                            <div
+                                class="h-2 rounded bg-blue-600 transition-all duration-300"
+                                :style="{ width: generateProgressPercent + '%' }"
+                            ></div>
+                        </div>
+                        <p class="mt-1 text-right text-[11px] text-blue-700">
+                            Tahap {{ currentGenerateStepIndex + 1 }} dari
+                            {{ generateSteps.length }}
+                        </p>
+                    </div>
                 </div>
+
+                <ol
+                    v-if="generateStatus === 'running'"
+                    class="mt-3 grid gap-2 text-xs text-gray-600 md:grid-cols-4"
+                >
+                    <li
+                        v-for="(step, index) in visibleGenerateSteps"
+                        :key="step"
+                        class="flex items-center gap-2"
+                    >
+                        <span
+                            class="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                            :class="
+                                index < currentGenerateStepIndex
+                                    ? 'bg-green-100 text-green-700'
+                                    : 'bg-blue-100 text-blue-700'
+                            "
+                        >
+                            {{
+                                index < currentGenerateStepIndex
+                                    ? "✓"
+                                    : index + 1
+                            }}
+                        </span>
+                        <span class="truncate">{{ step }}</span>
+                    </li>
+                </ol>
             </div>
 
             <div class="flex gap-6">
