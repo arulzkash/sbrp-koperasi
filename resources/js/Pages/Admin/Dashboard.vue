@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted, onBeforeUnmount, watch } from "vue";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout.vue";
 import { Head, router } from "@inertiajs/vue3";
 import L from "leaflet";
@@ -17,6 +17,24 @@ const props = defineProps({
 });
 
 const isGenerating = ref(false);
+const generateStatus = ref("idle");
+const generateErrorMessage = ref("");
+const currentGenerateStepIndex = ref(0);
+const showLongGenerateMessage = ref(false);
+
+const generateSteps = [
+    "Menyiapkan data siswa dan armada...",
+    "Mengelompokkan siswa ke armada...",
+    "Mengoptimalkan assignment rute pagi...",
+    "Menyeimbangkan kapasitas armada...",
+    "Mengurutkan titik jemput...",
+    "Menyimpan hasil rute...",
+    "Memuat ulang tampilan...",
+    "Menyelesaikan proses...",
+];
+
+let generateStepTimer = null;
+let generateLongWaitTimer = null;
 
 // STATE FILTER
 const viewMode = ref("morning"); // Pilihan: 'morning' / 'afternoon'
@@ -139,6 +157,22 @@ const hasRoutedStudents = computed(() => {
 
 const activeFleetsCount = computed(() => {
     return sidebarData.value.length;
+});
+
+const currentGenerateStep = computed(() => {
+    if (generateStatus.value === "success") {
+        return "Rute berhasil dibuat.";
+    }
+
+    if (generateStatus.value === "error") {
+        return generateErrorMessage.value || "Gagal membuat rute.";
+    }
+
+    return generateSteps[currentGenerateStepIndex.value];
+});
+
+const visibleGenerateSteps = computed(() => {
+    return generateSteps.slice(0, currentGenerateStepIndex.value + 1);
 });
 
 // 2. KELOMPOKKAN KE DALAM TRIP (Untuk Sidebar & Pembuatan Garis Peta)
@@ -342,6 +376,59 @@ const initMap = () => {
     renderMap(); // Panggil pertama kali
 };
 
+const clearGenerateTimers = () => {
+    if (generateStepTimer) {
+        clearInterval(generateStepTimer);
+        generateStepTimer = null;
+    }
+
+    if (generateLongWaitTimer) {
+        clearTimeout(generateLongWaitTimer);
+        generateLongWaitTimer = null;
+    }
+};
+
+const advanceGenerateStep = () => {
+    const finalWaitingStepIndex = generateSteps.length - 1;
+
+    if (currentGenerateStepIndex.value < finalWaitingStepIndex) {
+        currentGenerateStepIndex.value++;
+    }
+};
+
+const startGenerateProgress = () => {
+    clearGenerateTimers();
+
+    isGenerating.value = true;
+    generateStatus.value = "running";
+    generateErrorMessage.value = "";
+    showLongGenerateMessage.value = false;
+    currentGenerateStepIndex.value = 0;
+
+    generateStepTimer = setInterval(advanceGenerateStep, 1200);
+    generateLongWaitTimer = setTimeout(() => {
+        showLongGenerateMessage.value = true;
+    }, 10000);
+};
+
+const stopGenerateProgress = (status) => {
+    clearGenerateTimers();
+
+    generateStatus.value = status;
+    showLongGenerateMessage.value = false;
+
+    if (status === "success") {
+        currentGenerateStepIndex.value = generateSteps.length - 1;
+        generateErrorMessage.value = "";
+        return;
+    }
+
+    if (status === "error") {
+        generateErrorMessage.value =
+            "Gagal membuat rute. Silakan cek log backend.";
+    }
+};
+
 const generateRoute = () => {
     const confirmed = confirm(
         "Apakah Anda yakin ingin generate ulang rute? Penugasan rute yang ada akan dihitung ulang.",
@@ -351,13 +438,24 @@ const generateRoute = () => {
         return;
     }
 
-    isGenerating.value = true;
+    startGenerateProgress();
+
     router.post(
         "/admin/dashboard/generate",
         {},
         {
             preserveScroll: true,
+            onSuccess: () => {
+                stopGenerateProgress("success");
+            },
+            onError: () => {
+                stopGenerateProgress("error");
+            },
             onFinish: () => {
+                if (generateStatus.value === "running") {
+                    stopGenerateProgress("error");
+                }
+
                 isGenerating.value = false;
             },
         },
@@ -530,6 +628,10 @@ watch(
 onMounted(() => {
     initMap();
 });
+
+onBeforeUnmount(() => {
+    clearGenerateTimers();
+});
 </script>
 
 <template>
@@ -644,8 +746,76 @@ onMounted(() => {
                             <span v-if="!isGenerating"
                                 >🚀 Generate Rute Baru</span
                             >
-                            <span v-else>Menghitung Algoritma...</span>
+                            <span v-else>Memproses Rute...</span>
                         </button>
+                    </div>
+
+                    <div
+                        v-if="isGenerating || generateStatus !== 'idle'"
+                        class="w-full max-w-sm rounded-lg border bg-white p-3 text-left shadow-sm"
+                        :class="{
+                            'border-blue-200': generateStatus === 'running',
+                            'border-green-200 bg-green-50':
+                                generateStatus === 'success',
+                            'border-red-200 bg-red-50':
+                                generateStatus === 'error',
+                        }"
+                    >
+                        <p
+                            class="text-xs font-bold uppercase"
+                            :class="{
+                                'text-blue-700': generateStatus === 'running',
+                                'text-green-700': generateStatus === 'success',
+                                'text-red-700': generateStatus === 'error',
+                            }"
+                        >
+                            Status Generate
+                        </p>
+
+                        <p
+                            class="mt-1 text-sm font-semibold"
+                            :class="{
+                                'text-blue-900': generateStatus === 'running',
+                                'text-green-900': generateStatus === 'success',
+                                'text-red-900': generateStatus === 'error',
+                            }"
+                        >
+                            {{ currentGenerateStep }}
+                        </p>
+
+                        <p
+                            v-if="showLongGenerateMessage"
+                            class="mt-1 text-xs text-blue-700"
+                        >
+                            Proses masih berjalan, mohon tunggu...
+                        </p>
+
+                        <ol
+                            v-if="generateStatus === 'running'"
+                            class="mt-2 space-y-1 text-xs text-gray-600"
+                        >
+                            <li
+                                v-for="(step, index) in visibleGenerateSteps"
+                                :key="step"
+                                class="flex items-start gap-2"
+                            >
+                                <span
+                                    class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] font-bold"
+                                    :class="
+                                        index < currentGenerateStepIndex
+                                            ? 'bg-green-100 text-green-700'
+                                            : 'bg-blue-100 text-blue-700'
+                                    "
+                                >
+                                    {{
+                                        index < currentGenerateStepIndex
+                                            ? "✓"
+                                            : index + 1
+                                    }}
+                                </span>
+                                <span>{{ step }}</span>
+                            </li>
+                        </ol>
                     </div>
 
                     <p
