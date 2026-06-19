@@ -109,6 +109,9 @@ Route::middleware('auth')->group(function () {
 });
 
 Route::get('/admin/dashboard', [RouteController::class, 'index'])->name('admin.dashboard');
-Route::post('/admin/dashboard/generate', [RouteController::class, 'generate']);
+Route::post('/admin/dashboard/generate/morning', [RouteController::class, 'generateMorning'])
+    ->name('admin.routes.generate.morning');
+Route::post('/admin/dashboard/generate/afternoon', [RouteController::class, 'generateAfternoon'])
+    ->name('admin.routes.generate.afternoon');
 
 require __DIR__ . '/auth.php';

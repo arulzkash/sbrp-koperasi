@@ -261,6 +261,47 @@ class RouteOptimizerServiceTest extends TestCase
         $this->assertNotSame($westOutlier->afternoon_fleet_trip_id, $eastStudentOne->afternoon_fleet_trip_id);
     }
 
+    public function test_generate_morning_preserves_existing_afternoon_assignment(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $morningTrip = $this->createTrip($fleet, 'morning', '06:00:00');
+        $afternoonTrip = $this->createTrip($fleet, 'afternoon', '13:00:00');
+        $student = $this->createStudent();
+
+        $service = app(RouteOptimizerService::class);
+        $service->optimize();
+
+        $afternoonTrip->update(['is_active' => false]);
+        $morningTrip->update(['is_active' => false]);
+        $service->optimizeMorning();
+
+        $student->refresh();
+
+        $this->assertNull($student->morning_fleet_trip_id);
+        $this->assertSame($afternoonTrip->id, $student->afternoon_fleet_trip_id);
+        $this->assertSame('active', $student->status);
+    }
+
+    public function test_generate_afternoon_preserves_existing_morning_assignment(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $morningTrip = $this->createTrip($fleet, 'morning', '06:00:00');
+        $afternoonTrip = $this->createTrip($fleet, 'afternoon', '13:00:00');
+        $student = $this->createStudent();
+
+        $service = app(RouteOptimizerService::class);
+        $service->optimize();
+
+        $morningTrip->update(['is_active' => false]);
+        $afternoonTrip->update(['is_active' => false]);
+        $service->optimizeAfternoon();
+
+        $student->refresh();
+
+        $this->assertSame($morningTrip->id, $student->morning_fleet_trip_id);
+        $this->assertNull($student->afternoon_fleet_trip_id);
+        $this->assertSame('active', $student->status);
+    }
     public function test_morning_distance_estimation_includes_final_leg_to_school(): void
     {
         $service = app(RouteOptimizerService::class);

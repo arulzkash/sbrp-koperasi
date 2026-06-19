@@ -17,21 +17,27 @@ const props = defineProps({
 });
 
 const isGenerating = ref(false);
+const generatingDirection = ref(null);
 const generateStatus = ref("idle");
 const generateErrorMessage = ref("");
 const currentGenerateStepIndex = ref(0);
 const showLongGenerateMessage = ref(false);
 
-const generateSteps = [
-    "Menyiapkan data siswa dan armada...",
-    "Mengelompokkan siswa ke armada...",
-    "Mengoptimalkan assignment rute pagi...",
-    "Menyeimbangkan kapasitas armada...",
-    "Mengurutkan titik jemput...",
-    "Menyimpan hasil rute...",
-    "Memuat ulang tampilan...",
-    "Menyelesaikan proses...",
-];
+const generateSteps = computed(() => {
+    const directionLabel =
+        generatingDirection.value === "afternoon" ? "pulang" : "pagi";
+
+    return [
+        "Menyiapkan data siswa dan armada...",
+        "Mengelompokkan siswa ke armada...",
+        `Mengoptimalkan assignment rute ${directionLabel}...`,
+        "Menyeimbangkan kapasitas armada...",
+        "Mengurutkan titik layanan...",
+        "Menyimpan hasil rute...",
+        "Memuat ulang tampilan...",
+        "Menyelesaikan proses...",
+    ];
+});
 
 let generateStepTimer = null;
 let generateLongWaitTimer = null;
@@ -168,15 +174,15 @@ const currentGenerateStep = computed(() => {
         return generateErrorMessage.value || "Gagal membuat rute.";
     }
 
-    return generateSteps[currentGenerateStepIndex.value];
+    return generateSteps.value[currentGenerateStepIndex.value];
 });
 
 const visibleGenerateSteps = computed(() => {
-    return generateSteps.slice(0, currentGenerateStepIndex.value + 1);
+    return generateSteps.value.slice(0, currentGenerateStepIndex.value + 1);
 });
 
 const generateProgressPercent = computed(() => {
-    return ((currentGenerateStepIndex.value + 1) / generateSteps.length) * 100;
+    return ((currentGenerateStepIndex.value + 1) / generateSteps.value.length) * 100;
 });
 
 const coordinateKey = (lat, lng) => {
@@ -418,7 +424,7 @@ const clearGenerateTimers = () => {
 };
 
 const advanceGenerateStep = () => {
-    const finalWaitingStepIndex = generateSteps.length - 1;
+    const finalWaitingStepIndex = generateSteps.value.length - 1;
 
     if (currentGenerateStepIndex.value < finalWaitingStepIndex) {
         currentGenerateStepIndex.value++;
@@ -447,7 +453,7 @@ const stopGenerateProgress = (status) => {
     showLongGenerateMessage.value = false;
 
     if (status === "success") {
-        currentGenerateStepIndex.value = generateSteps.length - 1;
+        currentGenerateStepIndex.value = generateSteps.value.length - 1;
         generateErrorMessage.value = "";
         return;
     }
@@ -458,19 +464,21 @@ const stopGenerateProgress = (status) => {
     }
 };
 
-const generateRoute = () => {
+const generateRoute = (direction) => {
+    const directionLabel = direction === "morning" ? "pagi" : "pulang";
     const confirmed = confirm(
-        "Apakah Anda yakin ingin generate ulang rute? Penugasan rute yang ada akan dihitung ulang.",
+        `Apakah Anda yakin ingin generate ulang rute ${directionLabel}? Hanya penugasan rute ${directionLabel} yang akan dihitung ulang.`,
     );
 
     if (!confirmed) {
         return;
     }
 
+    generatingDirection.value = direction;
     startGenerateProgress();
 
     router.post(
-        "/admin/dashboard/generate",
+        `/admin/dashboard/generate/${direction}`,
         {},
         {
             preserveScroll: true,
@@ -768,22 +776,33 @@ onBeforeUnmount(() => {
                         </button>
 
                         <button
-                            @click="generateRoute"
+                            @click="generateRoute('morning')"
                             :disabled="isGenerating"
                             class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
                         >
-                            <span v-if="!isGenerating"
-                                >🚀 Generate Rute Baru</span
-                            >
-                            <span v-else>Memproses Rute...</span>
+                            <span v-if="!isGenerating || generatingDirection !== 'morning'">
+                                Generate Rute Pagi
+                            </span>
+                            <span v-else>Memproses Pagi...</span>
+                        </button>
+
+                        <button
+                            @click="generateRoute('afternoon')"
+                            :disabled="isGenerating"
+                            class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
+                        >
+                            <span v-if="!isGenerating || generatingDirection !== 'afternoon'">
+                                Generate Rute Pulang
+                            </span>
+                            <span v-else>Memproses Pulang...</span>
                         </button>
                     </div>
 
                     <p
                         class="text-[11px] text-right text-blue-700 max-w-xs leading-4"
                     >
-                        Generate memproses siswa yang sudah lunas dan sesuai
-                        mode layanan serta sesi pulang.
+                        Setiap tombol hanya menghitung ulang rute pada arah yang
+                        dipilih.
                     </p>
                 </div>
             </div>

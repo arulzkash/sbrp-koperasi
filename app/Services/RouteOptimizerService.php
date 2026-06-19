@@ -37,6 +37,43 @@ class RouteOptimizerService
             ->update(['status' => 'active']);
     }
 
+    public function optimizeMorning(): void
+    {
+        Student::query()->update([
+            'morning_fleet_id' => null,
+            'morning_fleet_trip_id' => null,
+            'morning_route_order' => null,
+        ]);
+
+        $this->optimizeMorningRoutes();
+        $this->refreshPaidStudentStatuses();
+    }
+
+    public function optimizeAfternoon(): void
+    {
+        Student::query()->update([
+            'afternoon_fleet_id' => null,
+            'afternoon_fleet_trip_id' => null,
+            'afternoon_route_order' => null,
+        ]);
+
+        $this->optimizeAfternoonRoutes();
+        $this->refreshPaidStudentStatuses();
+    }
+
+    private function refreshPaidStudentStatuses(): void
+    {
+        Student::where('payment_status', 'paid')
+            ->update(['status' => 'registered']);
+
+        Student::where('payment_status', 'paid')
+            ->where(function ($query) {
+                $query->whereNotNull('morning_fleet_id')
+                    ->orWhereNotNull('afternoon_fleet_id');
+            })
+            ->update(['status' => 'active']);
+    }
+
     /*
     |--------------------------------------------------------------------------
     | MORNING ROUTE

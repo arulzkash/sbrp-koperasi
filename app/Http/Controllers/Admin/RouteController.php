@@ -51,17 +51,25 @@ class RouteController extends Controller
         ]);
     }
 
-    // FUNGSI GENERATE
-    public function generate(Request $request)
+    public function generateMorning(Request $request)
     {
         if (Auth::user()?->role !== 'manager') {
             abort(403);
         }
-        
-        // Jalankan Algoritma (Logika Include Unpaid sudah kita buang sesuai kesepakatan)
-        $this->optimizer->optimize();
 
-        // Redirect/Kembali ke halaman map
-        return redirect()->back()->with('success', 'Generate rute berhasil dijalankan.');
+        $this->optimizer->optimizeMorning();
+
+        return redirect()->back()->with('success', 'Generate rute pagi berhasil dijalankan.');
+    }
+
+    public function generateAfternoon(Request $request)
+    {
+        if (Auth::user()?->role !== 'manager') {
+            abort(403);
+        }
+
+        $this->optimizer->optimizeAfternoon();
+
+        return redirect()->back()->with('success', 'Generate rute pulang berhasil dijalankan.');
     }
 }
