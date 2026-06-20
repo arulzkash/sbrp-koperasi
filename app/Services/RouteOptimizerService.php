@@ -708,7 +708,11 @@ class RouteOptimizerService
             return;
         }
 
-        $groupedBySession = $studentsAll->groupBy('session_out');
+        // Normalize values from every data source (web input may use H:i while
+        // seeded/database TIME values commonly use H:i:s).
+        $groupedBySession = $studentsAll->groupBy(
+            fn (Student $student) => $this->normalizeSessionTime($student->session_out)
+        );
         $totalAssigned = 0;
 
         foreach ($groupedBySession as $session => $students) {
@@ -804,6 +808,17 @@ class RouteOptimizerService
         $this->logOptimizerTime('Afternoon optimizer finished', $afternoonStart, [
             'total_assigned_students' => $totalAssigned,
         ]);
+    }
+
+    private function normalizeSessionTime(?string $time): string
+    {
+        if (! $time) {
+            return '';
+        }
+
+        $timestamp = strtotime($time);
+
+        return $timestamp === false ? $time : date('H:i:s', $timestamp);
     }
 
     private function clusterAfternoonByInsertionCost($students, $trips): array

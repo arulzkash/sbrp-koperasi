@@ -150,6 +150,24 @@ class RouteOptimizerServiceTest extends TestCase
         $this->assertSame($trip->id, $dropoffOnlyStudent->afternoon_fleet_trip_id);
     }
 
+    public function test_afternoon_optimizer_normalizes_short_session_time_before_matching_trip(): void
+    {
+        $fleet = $this->createFleet(capacity: 2);
+        $trip = $this->createTrip($fleet, 'afternoon', '15:30:00');
+        $student = $this->createStudent([
+            'service_type' => 'full',
+            'session_out' => '15:30',
+            'latitude' => -6.82000000,
+            'longitude' => 107.63000000,
+        ]);
+
+        app(RouteOptimizerService::class)->optimizeAfternoon();
+
+        $student->refresh();
+
+        $this->assertSame($trip->id, $student->afternoon_fleet_trip_id);
+    }
+
     public function test_afternoon_optimizer_does_not_assign_pickup_only_students(): void
     {
         $fleet = $this->createFleet(capacity: 2);

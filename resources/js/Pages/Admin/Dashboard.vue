@@ -70,6 +70,15 @@ const formatTime = (time) => {
     return time ? time.substring(0, 5) : "-";
 };
 
+const normalizeTime = (time) => {
+    if (!time) return "";
+
+    const parts = String(time).split(":");
+    return [parts[0] ?? "00", parts[1] ?? "00", parts[2] ?? "00"]
+        .map((part) => part.padStart(2, "0"))
+        .join(":");
+};
+
 const getTripId = (student) => {
     return viewMode.value === "morning"
         ? student.morning_fleet_trip_id
@@ -109,7 +118,7 @@ const filteredStudents = computed(() => {
             .filter(
                 (s) =>
                     s.afternoon_fleet_trip_id !== null &&
-                    s.session_out === selectedSession.value,
+                    normalizeTime(s.session_out) === normalizeTime(selectedSession.value),
             )
             .sort((a, b) => a.afternoon_route_order - b.afternoon_route_order);
     }
@@ -129,7 +138,7 @@ const routeReadyStudents = computed(() => {
         return (
             student.payment_status === "paid" &&
             ["full", "dropoff_only"].includes(student.service_type) &&
-            student.session_out === selectedSession.value
+            normalizeTime(student.session_out) === normalizeTime(selectedSession.value)
         );
     });
 });
@@ -215,7 +224,7 @@ const sidebarData = computed(() => {
 
             return (
                 trip.direction === "afternoon" &&
-                trip.departure_time === selectedSession.value
+                normalizeTime(trip.departure_time) === normalizeTime(selectedSession.value)
             );
         })
         .map((trip) => {

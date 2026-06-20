@@ -68,7 +68,9 @@ class RegisteredUserController extends Controller
             ])->withInput();
         }
 
-        $resolvedSessionOut = $selectedClass['session_out'] ?? null;
+        $resolvedSessionOut = isset($selectedClass['session_out'])
+            ? date('H:i:s', strtotime($selectedClass['session_out']))
+            : null;
 
         DB::transaction(function () use ($request, $resolvedSessionOut) {
             $user = User::create([
