@@ -690,15 +690,26 @@ class RouteOptimizerService
 
     private function optimizeAfternoonRoutes()
     {
+        $afternoonStart = microtime(true);
+
         $studentsAll = Student::where('payment_status', 'paid')
             ->whereIn('service_type', ['full', 'dropoff_only'])
             ->get();
 
+        Log::info('[RouteOptimizer] Afternoon optimizer started', [
+            'total_students_loaded' => $studentsAll->count(),
+        ]);
+
         if ($studentsAll->isEmpty()) {
+            $this->logOptimizerTime('Afternoon optimizer finished', $afternoonStart, [
+                'total_assigned_students' => 0,
+            ]);
+
             return;
         }
 
         $groupedBySession = $studentsAll->groupBy('session_out');
+        $totalAssigned = 0;
 
         foreach ($groupedBySession as $session => $students) {
             if (! $session) {
@@ -781,11 +792,18 @@ class RouteOptimizerService
                 ]);
             }
 
+            $sessionAssigned = array_sum($this->summarizeTripLoads($tripStudents));
+            $totalAssigned += $sessionAssigned;
+
             $this->logOptimizerTime('Afternoon session finished', $sessionStart, [
                 'session' => $session,
-                'total_assigned_students' => array_sum($this->summarizeTripLoads($tripStudents)),
+                'total_assigned_students' => $sessionAssigned,
             ]);
         }
+
+        $this->logOptimizerTime('Afternoon optimizer finished', $afternoonStart, [
+            'total_assigned_students' => $totalAssigned,
+        ]);
     }
 
     private function clusterAfternoonByInsertionCost($students, $trips): array
