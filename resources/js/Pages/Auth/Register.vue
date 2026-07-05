@@ -59,6 +59,21 @@ const estimatedMonthlyPrice = computed(() => {
 });
 
 const refreshEstimatedPrice = async () => {
+    if (form.latitude && form.longitude) {
+        const pricing = await estimatePricing({
+            latitude: form.latitude,
+            longitude: form.longitude,
+            service_type: form.service_type,
+        });
+
+        if (pricing.distanceMeters !== null) {
+            form.distance = pricing.distanceMeters / 1000;
+        }
+
+        form.price_estimasi = pricing.servicePrice ?? 0;
+        return;
+    }
+
     const baseMonthlyPrice = Number(priceParam || 0);
 
     if (baseMonthlyPrice > 0) {
@@ -71,15 +86,7 @@ const refreshEstimatedPrice = async () => {
         return;
     }
 
-    const distanceMeters = Number(form.distance || 0) * 1000;
-    const durationMin = (Number(form.distance || 0) / 18) * 60;
-    const pricing = await estimatePricing({
-        distance_meters: distanceMeters,
-        duration_min: durationMin,
-        service_type: form.service_type,
-    });
-
-    form.price_estimasi = pricing.servicePrice ?? 0;
+    form.price_estimasi = 0;
 };
 
 watch(

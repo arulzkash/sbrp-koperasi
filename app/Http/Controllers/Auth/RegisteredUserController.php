@@ -3,19 +3,19 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Models\Student;
 use App\Models\User;
-use Illuminate\Auth\Events\Registered;
+use App\Services\PricingService;
+use App\Services\RouteDistanceService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Validation\Rules;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules;
 use Inertia\Inertia;
 use Inertia\Response;
-
-use App\Models\Student;
-use Illuminate\Support\Facades\DB;
 
 class RegisteredUserController extends Controller
 {
@@ -34,8 +34,11 @@ class RegisteredUserController extends Controller
      *
      * @throws \Illuminate\Validation\ValidationException
      */
-    public function store(Request $request): RedirectResponse
-    {
+    public function store(
+        Request $request,
+        PricingService $pricingService,
+        RouteDistanceService $routeDistanceService,
+    ): RedirectResponse {
         $classOptions = collect(config('student_schedule.levels'));
         $validLevels = $classOptions->keys()->all();
         $validClasses = $classOptions
@@ -49,8 +52,8 @@ class RegisteredUserController extends Controller
             'email' => 'required|string|lowercase|email|max:255|unique:' . User::class,
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'student_name' => 'nullable|string|max:255',
-            'latitude' => 'nullable',
-            'longitude' => 'nullable',
+            'latitude' => 'nullable|numeric|between:-90,90',
+            'longitude' => 'nullable|numeric|between:-180,180',
             'school_level' => ['nullable', Rule::in($validLevels), 'required_with:student_name,latitude,longitude'],
             'class_room' => ['nullable', Rule::in($validClasses), 'required_with:student_name,latitude,longitude'],
             'class_room_note' => 'nullable|string|max:50',
@@ -62,7 +65,7 @@ class RegisteredUserController extends Controller
         $selectedClass = collect($classOptions->get($request->school_level, []))
             ->firstWhere('value', $request->class_room);
 
-        if ($request->filled('student_name') && !$selectedClass) {
+        if ($request->filled('student_name') && ! $selectedClass) {
             return back()->withErrors([
                 'class_room' => 'Kelas tidak cocok dengan jenjang yang dipilih.',
             ])->withInput();
@@ -72,7 +75,7 @@ class RegisteredUserController extends Controller
             ? date('H:i:s', strtotime($selectedClass['session_out']))
             : null;
 
-        DB::transaction(function () use ($request, $resolvedSessionOut) {
+        DB::transaction(function () use ($request, $resolvedSessionOut, $pricingService, $routeDistanceService) {
             $user = User::create([
                 'name' => $request->name,
                 'email' => $request->email,
@@ -81,20 +84,30 @@ class RegisteredUserController extends Controller
             ]);
 
             if ($request->latitude && $request->student_name) {
+                $latitude = (float) $request->latitude;
+                $longitude = (float) $request->longitude;
+                $serviceType = $request->service_type ?? 'full';
+                $routeEstimate = $routeDistanceService->estimateToSchool($latitude, $longitude);
+                $pricing = $pricingService->calculatePricing(
+                    $routeEstimate['distance_meters'],
+                    $routeEstimate['duration_min'],
+                    0,
+                );
+
                 Student::create([
                     'user_id' => $user->id,
                     'name' => $request->student_name,
                     'school_level' => $request->school_level ?? 'SD',
                     'class_room' => $request->class_room,
                     'class_room_note' => $request->class_room_note,
-                    'service_type' => $request->service_type ?? 'full',
+                    'service_type' => $serviceType,
                     'session_in' => $request->session_in,
                     'session_out' => $resolvedSessionOut,
                     'address_text' => 'Alamat dari Pin Map',
-                    'latitude' => $request->latitude,
-                    'longitude' => $request->longitude,
-                    'distance_to_school_meters' => ($request->distance * 1000),
-                    'price_per_month' => $request->price_estimasi,
+                    'latitude' => $latitude,
+                    'longitude' => $longitude,
+                    'distance_to_school_meters' => (int) round($routeEstimate['distance_meters']),
+                    'price_per_month' => $pricingService->calculateServicePrice($pricing['monthly_pp'], $serviceType),
                     'status' => 'registered',
                     'payment_status' => 'unpaid',
                 ]);

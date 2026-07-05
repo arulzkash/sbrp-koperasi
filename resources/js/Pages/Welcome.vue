@@ -84,8 +84,8 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
 
 const applyPricing = async () => {
     const pricing = await estimatePricing({
-        distance_meters: distanceMeters.value,
-        duration_min: durationMin.value,
+        latitude: userLat.value,
+        longitude: userLng.value,
         access_surcharge: accessSurcharge.value,
         service_type: "full",
     });
@@ -95,6 +95,15 @@ const applyPricing = async () => {
     estimatedPrice.value = pricing.monthlyPP;
     monthlyDistanceCharge.value = pricing.distanceCharge;
     monthlyDurationCharge.value = pricing.durationCharge;
+
+    if (pricing.distanceMeters !== null) {
+        distanceMeters.value = pricing.distanceMeters;
+        distanceKm.value = pricing.distanceMeters / 1000;
+    }
+
+    if (pricing.durationMin !== null) {
+        durationMin.value = pricing.durationMin;
+    }
 };
 
 const renderFallbackRoute = (lat, lng) => {

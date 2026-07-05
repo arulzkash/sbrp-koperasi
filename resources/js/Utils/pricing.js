@@ -30,5 +30,8 @@ export const estimatePricing = async (payload) => {
         estimatedTripFare: data.estimated_trip_fare ?? 0,
         distanceCharge: data.distance_charge ?? 0,
         durationCharge: data.duration_charge ?? 0,
+        distanceMeters: data.distance_meters ?? null,
+        durationMin: data.duration_min ?? null,
+        routeSource: data.route_source ?? 'request',
     };
 };

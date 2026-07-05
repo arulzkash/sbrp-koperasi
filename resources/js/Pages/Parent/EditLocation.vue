@@ -106,11 +106,12 @@ const updateMapAndData = async (lat, lng) => {
             form.distance = distanceMeters / 1000;
 
             const pricing = await estimatePricing({
-                distance_meters: distanceMeters,
-                duration_min: durationMin,
+                latitude: lat,
+                longitude: lng,
                 service_type: 'full',
             });
 
+            form.distance = (pricing.distanceMeters ?? distanceMeters) / 1000;
             form.price = pricing.monthlyPP;
             form.one_way_price = pricing.monthlyOneWay;
 
@@ -139,12 +140,13 @@ const updateMapAndData = async (lat, lng) => {
         form.distance = distanceKm;
 
         const pricing = await estimatePricing({
-            distance_meters: distanceMeters,
-            duration_min: durationMin,
-            service_type: 'full',
-        });
+                latitude: lat,
+                longitude: lng,
+                service_type: 'full',
+            });
 
-        form.price = pricing.monthlyPP;
+            form.distance = (pricing.distanceMeters ?? distanceMeters) / 1000;
+            form.price = pricing.monthlyPP;
         form.one_way_price = pricing.monthlyOneWay;
 
         routeLine = L.polyline(
