@@ -53,7 +53,7 @@ Route::get('/dashboard', function () {
     ]);
 })->middleware(['auth', 'verified'])->name('dashboard');
 
-Route::post('/pricing/estimate', [PricingController::class, 'estimate'])->name('pricing.estimate');
+Route::match(['get', 'post'], '/pricing/estimate', [PricingController::class, 'estimate'])->name('pricing.estimate');
 
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');

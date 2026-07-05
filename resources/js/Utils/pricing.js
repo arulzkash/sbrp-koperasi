@@ -1,17 +1,19 @@
 export const estimatePricing = async (payload) => {
-    const csrfToken = document
-        .querySelector('meta[name="csrf-token"]')
-        ?.getAttribute('content');
+    const params = new URLSearchParams();
 
-    const response = await fetch(route('pricing.estimate'), {
-        method: 'POST',
+    Object.entries(payload).forEach(([key, value]) => {
+        if (value !== null && value !== undefined && value !== '') {
+            params.set(key, value);
+        }
+    });
+
+    const response = await fetch(`${route('pricing.estimate')}?${params.toString()}`, {
+        method: 'GET',
         credentials: 'same-origin',
         headers: {
-            'Content-Type': 'application/json',
+            'Accept': 'application/json',
             'X-Requested-With': 'XMLHttpRequest',
-            ...(csrfToken ? { 'X-CSRF-TOKEN': csrfToken } : {}),
         },
-        body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
