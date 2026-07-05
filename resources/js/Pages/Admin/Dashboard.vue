@@ -767,8 +767,8 @@ onBeforeUnmount(() => {
             </h2>
         </template>
 
-        <div class="p-6 max-w-7xl mx-auto">
-            <div class="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 sm:py-6">
+            <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div class="rounded-lg border border-blue-200 bg-blue-50 p-4">
                     <p class="text-xs font-bold uppercase text-blue-700">
                         Siswa Siap Dirutekan
@@ -810,18 +810,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div
-                class="mb-4 p-4 bg-blue-50 border border-blue-200 rounded flex flex-col md:flex-row items-center justify-between gap-4"
+                class="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 sm:p-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between"
             >
                 <!-- LEFT SIDE -->
-                <div class="flex flex-wrap items-center gap-4">
-                    <div class="flex flex-col">
+                <div class="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:w-auto lg:flex lg:flex-wrap lg:items-end">
+                    <div class="flex w-full flex-col lg:w-auto">
                         <label
                             class="text-xs font-bold text-gray-500 mb-1 uppercase"
                             >Mode Rute</label
                         >
                         <select
                             v-model="viewMode"
-                            class="border-gray-300 rounded-md shadow-sm font-semibold"
+                            class="w-full rounded-lg border-gray-300 text-sm font-semibold shadow-sm focus:border-blue-500 focus:ring-blue-500 lg:min-w-[16rem]"
                         >
                             <option value="morning">
                                 ☀️ Rute Pagi (Ke Sekolah)
@@ -832,14 +832,17 @@ onBeforeUnmount(() => {
                         </select>
                     </div>
 
-                    <div class="flex flex-col" v-if="viewMode === 'afternoon'">
+                    <div
+                        class="flex w-full flex-col lg:w-auto"
+                        v-if="viewMode === 'afternoon'"
+                    >
                         <label
                             class="text-xs font-bold text-gray-500 mb-1 uppercase"
                             >Sesi Jam Pulang</label
                         >
                         <select
                             v-model="selectedSession"
-                            class="border-gray-300 rounded-md shadow-sm font-semibold"
+                            class="w-full rounded-lg border-gray-300 text-sm font-semibold shadow-sm focus:border-blue-500 focus:ring-blue-500 lg:min-w-[16rem]"
                         >
                             <option value="13:00:00">Sesi 1 (13:00 WIB)</option>
                             <option value="13:30:00">Sesi 2 (13:30 WIB)</option>
@@ -851,20 +854,24 @@ onBeforeUnmount(() => {
                 </div>
 
                 <!-- RIGHT SIDE BUTTON GROUP -->
-                <div class="flex flex-col items-end gap-2">
-                    <div class="flex items-center gap-3">
+                <div class="flex w-full flex-col items-stretch gap-2 lg:w-auto lg:items-end">
+                    <div
+                        class="grid w-full grid-cols-1 gap-2 sm:grid-cols-2 lg:flex lg:w-auto lg:items-center lg:gap-3"
+                    >
                         <button
                             v-if="activeTripId"
+                            type="button"
                             @click="startAnimation"
-                            class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow"
+                            class="inline-flex w-full items-center justify-center rounded-lg bg-green-600 px-4 py-2.5 text-sm font-bold text-white shadow transition hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 lg:w-auto"
                         >
                             ▶ Simulasi Armada
                         </button>
 
                         <button
+                            type="button"
                             @click="generateRoute('morning')"
                             :disabled="isGenerating"
-                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-bold text-white shadow transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto lg:px-6"
                         >
                             <span v-if="!isGenerating || generatingDirection !== 'morning'">
                                 Generate Rute Pagi
@@ -873,9 +880,10 @@ onBeforeUnmount(() => {
                         </button>
 
                         <button
+                            type="button"
                             @click="generateRoute('afternoon')"
                             :disabled="isGenerating"
-                            class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-6 rounded shadow disabled:opacity-50 flex items-center gap-2"
+                            class="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-orange-600 px-4 py-2.5 text-sm font-bold text-white shadow transition hover:bg-orange-700 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 lg:w-auto lg:px-6"
                         >
                             <span v-if="!isGenerating || generatingDirection !== 'afternoon'">
                                 Generate Rute Pulang
@@ -885,7 +893,7 @@ onBeforeUnmount(() => {
                     </div>
 
                     <p
-                        class="text-[11px] text-right text-blue-700 max-w-xs leading-4"
+                        class="max-w-none text-left text-[11px] leading-4 text-blue-700 lg:max-w-xs lg:text-right"
                     >
                         Setiap tombol hanya menghitung ulang rute pada arah yang
                         dipilih.
@@ -953,7 +961,7 @@ onBeforeUnmount(() => {
 
                 <ol
                     v-if="generateStatus === 'running'"
-                    class="mt-3 grid gap-2 text-xs text-gray-600 md:grid-cols-4"
+                    class="mt-3 grid gap-2 text-xs text-gray-600 sm:grid-cols-2 lg:grid-cols-4"
                 >
                     <li
                         v-for="(step, index) in visibleGenerateSteps"
@@ -979,16 +987,16 @@ onBeforeUnmount(() => {
                 </ol>
             </div>
 
-            <div class="flex gap-6">
-                <div class="w-2/3">
+            <div class="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)] lg:gap-6">
+                <div class="min-w-0">
                     <div
                         id="map"
-                        class="h-[600px] rounded shadow z-0 border border-gray-300"
+                        class="h-[420px] w-full rounded-lg border border-gray-300 shadow z-0 sm:h-[500px] lg:h-[600px]"
                     ></div>
                 </div>
 
                 <div
-                    class="w-1/3 bg-white p-4 rounded shadow border border-gray-200 max-h-[600px] overflow-y-auto pr-1"
+                    class="min-w-0 max-h-[70vh] overflow-y-auto overscroll-contain rounded-lg border border-gray-200 bg-white p-4 pr-2 shadow sm:max-h-[520px] lg:max-h-[600px] lg:pr-1"
                 >
                     <!-- HEADER -->
                     <h2 class="font-semibold text-gray-800 text-lg mb-1">
@@ -1046,7 +1054,11 @@ onBeforeUnmount(() => {
                         v-for="(trip, index) in sidebarData"
                         :key="trip.id"
                         @click="focusTrip(trip.id)"
-                        class="mb-4 cursor-pointer rounded-lg border p-3 transition-all duration-200"
+                        @keydown.enter.prevent="focusTrip(trip.id)"
+                        @keydown.space.prevent="focusTrip(trip.id)"
+                        role="button"
+                        tabindex="0"
+                        class="mb-4 cursor-pointer rounded-lg border p-3 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         :class="{
                             'bg-yellow-50 border-yellow-300 shadow-sm':
                                 activeTripId === trip.id,
@@ -1056,8 +1068,8 @@ onBeforeUnmount(() => {
                         }"
                     >
                         <!-- HEADER -->
-                        <div class="flex items-center justify-between mb-2">
-                            <div class="flex items-center gap-2">
+                        <div class="flex items-start justify-between gap-3 mb-2">
+                            <div class="flex min-w-0 items-center gap-2">
                                 <span
                                     class="w-3 h-3 rounded-full"
                                     :style="{
@@ -1066,12 +1078,12 @@ onBeforeUnmount(() => {
                                     }"
                                 ></span>
 
-                                <h3 class="font-semibold text-gray-800">
+                                <h3 class="break-words font-semibold text-gray-800">
                                     🚗 {{ trip.fleet?.name || "-" }}
                                 </h3>
                             </div>
 
-                            <span class="text-xs text-gray-400 font-medium">
+                            <span class="shrink-0 text-xs text-gray-400 font-medium">
                                 {{ trip.assigned_students.length }}/{{
                                     trip.capacity
                                 }}
@@ -1139,7 +1151,7 @@ onBeforeUnmount(() => {
                                 </span>
 
                                 <!-- NAME -->
-                                <p class="font-medium text-gray-700">
+                                <p class="break-words font-medium text-gray-700">
                                     {{ student.name }}
                                 </p>
 
