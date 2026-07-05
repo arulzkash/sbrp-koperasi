@@ -31,11 +31,6 @@ class Fleet extends Model
         return $this->hasMany(Student::class, 'afternoon_fleet_id');
     }
 
-    public function students()
-    {
-        return $this->hasMany(Student::class);
-    }
-
     public function trips()
     {
         return $this->hasMany(FleetTrip::class);

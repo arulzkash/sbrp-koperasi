@@ -157,7 +157,6 @@ class DatabaseSeeder extends Seeder
 
                 Student::create([
                     'user_id' => $parents[$parentIndex]->id,
-                    'fleet_id' => $fleet->id,
                     'name' => 'Siswa ' . $studentCounter,
                     'school_level' => $schoolLevel,
                     'class_room' => $classOption['value'],

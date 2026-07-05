@@ -8,7 +8,6 @@ class Student extends Model
 {
     protected $fillable = [
         'user_id',
-        'fleet_id',
         'name',
         'school_level',
         'class_room',
@@ -23,7 +22,6 @@ class Student extends Model
         'price_per_month',
         'status',
         'payment_status',
-        'route_order',
         'morning_fleet_id',
         'morning_fleet_trip_id',
         'morning_route_order',
@@ -31,11 +29,6 @@ class Student extends Model
         'afternoon_fleet_trip_id',
         'afternoon_route_order',
     ];
-
-    public function fleet()
-    {
-        return $this->belongsTo(Fleet::class);
-    }
 
     public function user()
     {
