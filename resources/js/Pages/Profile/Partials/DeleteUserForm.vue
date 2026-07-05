@@ -52,7 +52,7 @@ const closeModal = () => {
             </p>
         </header>
 
-        <DangerButton @click="confirmUserDeletion">Delete Account</DangerButton>
+        <DangerButton class="w-full sm:w-auto" @click="confirmUserDeletion">Delete Account</DangerButton>
 
         <Modal :show="confirmingUserDeletion" @close="closeModal">
             <div class="p-6">
@@ -80,7 +80,7 @@ const closeModal = () => {
                         ref="passwordInput"
                         v-model="form.password"
                         type="password"
-                        class="mt-1 block w-3/4"
+                        class="mt-1 block w-full sm:w-3/4"
                         placeholder="Password"
                         @keyup.enter="deleteUser"
                     />
@@ -88,13 +88,13 @@ const closeModal = () => {
                     <InputError :message="form.errors.password" class="mt-2" />
                 </div>
 
-                <div class="mt-6 flex justify-end">
-                    <SecondaryButton @click="closeModal">
+                <div class="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                    <SecondaryButton class="w-full sm:w-auto" @click="closeModal">
                         Cancel
                     </SecondaryButton>
 
                     <DangerButton
-                        class="ms-3"
+                        class="w-full sm:ms-3 sm:w-auto"
                         :class="{ 'opacity-25': form.processing }"
                         :disabled="form.processing"
                         @click="deleteUser"

@@ -150,7 +150,7 @@ const formatDistanceKm = (angka) => {
                         Lokasi Jemputan Terdeteksi
                     </h2>
 
-                    <div class="mt-4 grid grid-cols-2 gap-3">
+                    <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div class="rounded-xl border border-blue-100 bg-white p-3">
                             <p class="text-[10px] uppercase tracking-wide text-slate-500">
                                 Jarak
@@ -473,6 +473,7 @@ const formatDistanceKm = (angka) => {
                         </Link>
 
                         <PrimaryButton
+                            class="w-full sm:w-auto"
                             :class="{ 'opacity-25': form.processing }"
                             :disabled="form.processing || !hasPickupPoint"
                         >

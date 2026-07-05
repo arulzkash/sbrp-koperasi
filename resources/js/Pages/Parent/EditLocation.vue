@@ -300,7 +300,7 @@ const formatRupiah = (angka) => {
         </template>
 
         <div class="py-6 sm:py-8 lg:py-10">
-            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <form
                     @submit.prevent="submit"
                     class="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row gap-6"

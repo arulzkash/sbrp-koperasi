@@ -38,8 +38,8 @@ const formatTime = (time) => {
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">Dashboard Orang Tua</h2>
         </template>
 
-        <div class="py-12">
-            <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+        <div class="px-4 py-6 sm:px-6 lg:px-8 lg:py-12">
+            <div class="max-w-7xl mx-auto">
                 
                 <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-6">
                     <div class="p-6 text-gray-900 font-bold text-lg border-b">
@@ -50,8 +50,8 @@ const formatTime = (time) => {
                     </div>
                 </div>
 
-                <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold text-gray-700">Status Langganan Siswa</h3>
+                <div class="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <h3 class="text-lg font-bold text-gray-700 sm:text-xl">Status Langganan Siswa</h3>
 
                     <div v-if="children.length > 0" class="text-xs text-gray-500">
                         Kelola lokasi per siswa pada kartu di bawah.
@@ -65,15 +65,15 @@ const formatTime = (time) => {
                 </div>
 
                 <div v-else class="grid grid-cols-1 gap-6">
-                    <div v-for="child in children" :key="child.id" class="bg-white rounded-lg shadow-md overflow-hidden border border-gray-200">
+                    <div v-for="child in children" :key="child.id" class="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-md">
                         
-                        <div class="bg-gray-50 p-4 border-b flex justify-between items-start">
+                        <div class="flex flex-col gap-3 border-b bg-gray-50 p-4 sm:flex-row sm:items-start sm:justify-between">
                             <div>
-                                <h4 class="font-bold text-lg text-gray-800">{{ child.name }}</h4>
-                                <p class="text-xs font-semibold text-gray-600 mt-1">
-                                    <span class="bg-gray-200 px-2 py-1 rounded text-gray-700 mr-2">{{ child.school_level }}</span>
-                                    <span class="bg-gray-200 px-2 py-1 rounded text-gray-700 mr-2">Kelas: {{ formatClass(child) }}</span>
-                                    <span class="bg-blue-100 text-blue-800 font-bold px-2 py-1 rounded">{{ getServiceName(child.service_type) }}</span>
+                                <h4 class="break-words text-lg font-bold text-gray-800">{{ child.name }}</h4>
+                                <p class="mt-1 flex flex-wrap gap-2 text-xs font-semibold text-gray-600">
+                                    <span class="rounded bg-gray-200 px-2 py-1 text-gray-700">{{ child.school_level }}</span>
+                                    <span class="rounded bg-gray-200 px-2 py-1 text-gray-700">Kelas: {{ formatClass(child) }}</span>
+                                    <span class="rounded bg-blue-100 px-2 py-1 font-bold text-blue-800">{{ getServiceName(child.service_type) }}</span>
                                 </p>
 
                                 <div class="mt-3">
@@ -94,23 +94,23 @@ const formatTime = (time) => {
                                 </div>
                             </div>
 
-                            <span v-if="child.payment_status === 'unpaid'" class="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-bold border border-red-200">
+                            <span v-if="child.payment_status === 'unpaid'" class="self-start rounded-full border border-red-200 bg-red-100 px-3 py-1 text-xs font-bold text-red-700 sm:self-auto">
                                 BELUM BAYAR
                             </span>
-                            <span v-else class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold border border-green-200">
+                            <span v-else class="self-start rounded-full border border-green-200 bg-green-100 px-3 py-1 text-xs font-bold text-green-700 sm:self-auto">
                                 LUNAS
                             </span>
                         </div>
 
 
                         <div class="p-4">
-                            <div class="mb-4 bg-gray-50 p-3 rounded border border-gray-100 flex justify-between items-center">
+                            <div class="mb-4 flex flex-col gap-3 rounded border border-gray-100 bg-gray-50 p-3 sm:flex-row sm:items-start sm:justify-between">
                                 <div>
                                     <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">📍 Alamat Titik Jemput:</p>
-                                    <p class="font-semibold text-gray-800 text-sm">{{ child.address_text }}</p>
+                                    <p class="break-words text-sm font-semibold text-gray-800">{{ child.address_text }}</p>
                                     <p class="text-xs text-blue-600 mt-1">[Lihat Koordinat: {{ child.latitude }}, {{ child.longitude }}]</p>
                                 </div>
-                                <div class="text-right">
+                                <div class="shrink-0 sm:text-right">
                                     <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Biaya / Bln:</p>
                                     <p class="font-bold text-red-600 text-lg">{{ formatRupiah(child.price_per_month) }}</p>
                                 </div>
@@ -118,7 +118,7 @@ const formatTime = (time) => {
 
                             <div class="mb-4">
                                 <p class="text-sm text-gray-500 mb-1">Status Layanan:</p>
-                                <div class="flex items-center gap-2">
+                                <div class="flex flex-wrap items-center gap-2">
                                     <span
                                         v-if="child.payment_status === 'unpaid'"
                                         class="text-red-600 font-bold text-sm"
@@ -151,10 +151,10 @@ const formatTime = (time) => {
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                                 
-                                <div v-if="['full', 'pickup_only'].includes(child.service_type)" class="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <div v-if="['full', 'pickup_only'].includes(child.service_type)" class="rounded-lg border border-blue-200 bg-blue-50 p-4">
                                     <p class="text-xs text-blue-700 font-bold uppercase mb-2">☀️ Armada Pagi (Berangkat)</p>
                                     <div v-if="child.morning_fleet">
-                                        <p class="text-lg font-bold text-gray-800">🚐 {{ child.morning_fleet.name }}</p>
+                                        <p class="break-words text-lg font-bold text-gray-800">🚐 {{ child.morning_fleet.name }}</p>
                                         <p class="text-sm text-gray-700 mt-1">Supir: <b>{{ child.morning_fleet.driver_name || '-' }}</b></p>
                                         <p v-if="child.morning_fleet_trip" class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border mr-2">Trip/Rit: <b>Ke-{{ child.morning_fleet_trip.trip_order }}</b></p>
                                         <p class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border">Estimasi Urutan Jemput: <b>Ke-{{ child.morning_route_order }}</b></p>
@@ -164,10 +164,10 @@ const formatTime = (time) => {
                                     </div>
                                 </div>
 
-                                <div v-if="['full', 'dropoff_only'].includes(child.service_type)" class="p-4 bg-orange-50 border border-orange-200 rounded-lg">
+                                <div v-if="['full', 'dropoff_only'].includes(child.service_type)" class="rounded-lg border border-orange-200 bg-orange-50 p-4">
                                     <p class="text-xs text-orange-700 font-bold uppercase mb-2">🌙 Armada Pulang (Sesi {{ formatTime(child.session_out) }})</p>
                                     <div v-if="child.afternoon_fleet">
-                                        <p class="text-lg font-bold text-gray-800">🚐 {{ child.afternoon_fleet.name }}</p>
+                                        <p class="break-words text-lg font-bold text-gray-800">🚐 {{ child.afternoon_fleet.name }}</p>
                                         <p class="text-sm text-gray-700 mt-1">Supir: <b>{{ child.afternoon_fleet.driver_name || '-' }}</b></p>
                                         <p v-if="child.afternoon_fleet_trip" class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border mr-2">Jam: <b>{{ formatTime(child.afternoon_fleet_trip.departure_time) }}</b> | Trip: <b>Ke-{{ child.afternoon_fleet_trip.trip_order }}</b></p>
                                         <p class="text-xs text-gray-600 mt-2 bg-white inline-block px-2 py-1 rounded border">Estimasi Urutan Antar: <b>Ke-{{ child.afternoon_route_order }}</b></p>
