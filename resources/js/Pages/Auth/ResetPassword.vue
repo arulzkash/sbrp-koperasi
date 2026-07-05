@@ -33,7 +33,7 @@ const submit = () => {
 
 <template>
     <GuestLayout>
-        <Head title="Reset Password" />
+        <Head title="Atur Ulang Password" />
 
         <form @submit.prevent="submit">
             <div>
