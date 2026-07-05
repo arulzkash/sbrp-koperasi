@@ -58,6 +58,22 @@ const routeCache = new Map();
 
 const SCHOOL_COORD = [-6.826864390637824, 107.63886429303408];
 
+const createSchoolIcon = () =>
+    L.divIcon({
+        html: `
+            <div class="school-map-marker" aria-label="Sekolah">
+                <div class="school-map-marker__roof"></div>
+                <div class="school-map-marker__building">
+                    <span></span><span></span><span></span>
+                </div>
+            </div>
+        `,
+        className: "",
+        iconSize: [34, 40],
+        iconAnchor: [17, 38],
+        popupAnchor: [0, -38],
+    });
+
 const formatClass = (student) => {
     if (!student.class_room) return "-";
 
@@ -257,10 +273,9 @@ const renderMap = () => {
     const bounds = [];
 
     // MARKER SEKOLAH
-    L.circleMarker(SCHOOL_COORD, {
-        color: "black",
-        radius: 10,
-        fillOpacity: 1,
+    L.marker(SCHOOL_COORD, {
+        icon: createSchoolIcon(),
+        zIndexOffset: 1000,
     })
         .addTo(markersLayer)
         .bindPopup("<b>SEKOLAH</b>");
@@ -678,7 +693,69 @@ onMounted(() => {
 onBeforeUnmount(() => {
     clearGenerateTimers();
 });
+
 </script>
+
+<style>
+.school-map-marker {
+    position: relative;
+    width: 34px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 3px 5px rgba(15, 23, 42, 0.35));
+}
+
+.school-map-marker::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    width: 10px;
+    height: 10px;
+    background: #1d4ed8;
+    border: 2px solid #ffffff;
+    transform: translateX(-50%) rotate(45deg);
+    z-index: -1;
+}
+
+.school-map-marker__roof {
+    position: absolute;
+    top: 5px;
+    width: 0;
+    height: 0;
+    border-left: 13px solid transparent;
+    border-right: 13px solid transparent;
+    border-bottom: 10px solid #1d4ed8;
+}
+
+.school-map-marker__building {
+    position: absolute;
+    top: 14px;
+    width: 28px;
+    height: 22px;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 3px;
+    align-items: end;
+    padding: 5px 4px 4px;
+    background: #ffffff;
+    border: 2px solid #1d4ed8;
+    border-radius: 5px;
+}
+
+.school-map-marker__building span {
+    height: 10px;
+    background: #f59e0b;
+    border-radius: 2px 2px 0 0;
+}
+
+.school-map-marker__building span:nth-child(2) {
+    height: 14px;
+    background: #2563eb;
+}
+</style>
 
 <template>
     <Head title="Monitoring Armada" />
