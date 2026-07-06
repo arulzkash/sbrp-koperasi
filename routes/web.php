@@ -4,6 +4,8 @@ use App\Http\Controllers\Admin\RouteController;
 use App\Http\Controllers\FinanceController;
 use App\Http\Controllers\PricingController;
 use App\Http\Controllers\ProfileController;
+use App\Services\PricingService;
+use App\Services\RouteDistanceService;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -76,27 +78,40 @@ Route::middleware('auth')->group(function () {
     })->name('location.edit');
 
     // 2. Route untuk MENYIMPAN perubahan dari Peta
-    Route::put('/update-location/{id}', function (Request $request, $id) {
+    Route::put('/update-location/{id}', function (
+        Request $request,
+        $id,
+        PricingService $pricingService,
+        RouteDistanceService $routeDistanceService,
+    ) {
         $student = Student::where('user_id', Auth::id())->findOrFail($id);
 
         if ($student->status === 'active') {
             return back()->with('error', 'Rute sudah terkunci.');
         }
 
-        $request->validate([
+        $validated = $request->validate([
             'address_text' => 'required|string',
-            'latitude' => 'required|numeric',
-            'longitude' => 'required|numeric',
-            'distance' => 'required|numeric',
-            'price' => 'required|numeric',
+            'latitude' => 'required|numeric|between:-90,90',
+            'longitude' => 'required|numeric|between:-180,180',
         ]);
 
+        $latitude = (float) $validated['latitude'];
+        $longitude = (float) $validated['longitude'];
+        $serviceType = $student->service_type ?? 'full';
+        $routeEstimate = $routeDistanceService->estimateToSchool($latitude, $longitude);
+        $pricing = $pricingService->calculatePricing(
+            $routeEstimate['distance_meters'],
+            $routeEstimate['duration_min'],
+            0,
+        );
+
         $student->update([
-            'address_text' => $request->address_text,
-            'latitude' => $request->latitude,
-            'longitude' => $request->longitude,
-            'distance_to_school_meters' => $request->distance * 1000,
-            'price_per_month' => $request->price,
+            'address_text' => $validated['address_text'],
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+            'distance_to_school_meters' => (int) round($routeEstimate['distance_meters']),
+            'price_per_month' => $pricingService->calculateServicePrice($pricing['monthly_pp'], $serviceType),
         ]);
 
         return redirect('/dashboard')->with('success', 'Lokasi jemputan berhasil diupdate.');
