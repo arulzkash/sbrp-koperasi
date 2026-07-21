@@ -150,6 +150,156 @@ class RouteBenchmarkCommandTest extends TestCase
         $this->assertSame($expectedAfternoon, $actualAfternoon);
     }
 
+    public function test_negative_scenarios_are_reported_without_assignments_or_crashes(): void
+    {
+        $summaries = [
+            $this->runInsufficientCapacityScenario(),
+            $this->runInvalidCoordinatesScenario(),
+            $this->runUnavailableTripsScenario(),
+        ];
+
+        $this->assertSame([
+            [
+                'scenario' => 'Kapasitas tidak cukup',
+                'data_condition' => '3 siswa eligible, 1 rit pagi aktif kapasitas 2',
+                'students_processed' => 3,
+                'students_allocated' => 2,
+                'students_unallocated' => 1,
+                'capacity_violations' => 0,
+                'status' => 'passed',
+            ],
+            [
+                'scenario' => 'Koordinat tidak valid',
+                'data_condition' => '2 siswa eligible dengan koordinat di luar rentang valid',
+                'students_processed' => 2,
+                'students_allocated' => 0,
+                'students_unallocated' => 2,
+                'capacity_violations' => 0,
+                'status' => 'passed',
+            ],
+            [
+                'scenario' => 'Rit tidak tersedia',
+                'data_condition' => '2 siswa pulang eligible sesi 13:00 tanpa rit aktif sesi tersebut',
+                'students_processed' => 2,
+                'students_allocated' => 0,
+                'students_unallocated' => 2,
+                'capacity_violations' => 0,
+                'status' => 'passed',
+            ],
+        ], $summaries);
+    }
+
+    private function runInsufficientCapacityScenario(): array
+    {
+        $this->resetBenchmarkFixture();
+        config(['logging.default' => 'null']);
+
+        $fleet = $this->createFleet(capacity: 2);
+        $this->createTrip($fleet, 'morning', '06:00:00');
+        $this->createStudent(['service_type' => 'pickup_only', 'latitude' => -6.82100000, 'longitude' => 107.63100000]);
+        $this->createStudent(['service_type' => 'pickup_only', 'latitude' => -6.82200000, 'longitude' => 107.63200000]);
+        $this->createStudent(['service_type' => 'pickup_only', 'latitude' => -6.82300000, 'longitude' => 107.63300000]);
+        $beforeSignature = $this->assignmentSignature();
+
+        $row = $this->benchmarkRow('morning');
+
+        $this->assertSame($beforeSignature, $this->assignmentSignature());
+        $this->assertSame(3, Student::whereNull('morning_fleet_trip_id')->count());
+        $this->assertSame(3, Student::count());
+        $this->assertSame(3, $row['students_processed']);
+        $this->assertSame(2, $row['students_allocated']);
+        $this->assertSame(1, $row['students_unallocated']);
+        $this->assertSame(0, $row['capacity_violations']);
+
+        return $this->scenarioSummary(
+            'Kapasitas tidak cukup',
+            '3 siswa eligible, 1 rit pagi aktif kapasitas 2',
+            $row,
+        );
+    }
+
+    private function runInvalidCoordinatesScenario(): array
+    {
+        $this->resetBenchmarkFixture();
+        config(['logging.default' => 'null']);
+
+        $fleet = $this->createFleet(capacity: 2);
+        $this->createTrip($fleet, 'morning', '06:00:00');
+        $this->createStudent(['service_type' => 'pickup_only', 'latitude' => 120, 'longitude' => 107.63100000]);
+        $this->createStudent(['service_type' => 'pickup_only', 'latitude' => -6.82200000, 'longitude' => 200]);
+        $beforeSignature = $this->assignmentSignature();
+
+        $row = $this->benchmarkRow('morning');
+
+        $this->assertSame($beforeSignature, $this->assignmentSignature());
+        $this->assertSame(2, Student::whereNull('morning_fleet_trip_id')->count());
+        $this->assertSame(2, $row['students_processed']);
+        $this->assertSame(0, $row['students_allocated']);
+        $this->assertSame(2, $row['students_unallocated']);
+        $this->assertSame(0, $row['capacity_violations']);
+
+        return $this->scenarioSummary(
+            'Koordinat tidak valid',
+            '2 siswa eligible dengan koordinat di luar rentang valid',
+            $row,
+        );
+    }
+
+    private function runUnavailableTripsScenario(): array
+    {
+        $this->resetBenchmarkFixture();
+        config(['logging.default' => 'null']);
+
+        $fleet = $this->createFleet(capacity: 2);
+        $this->createTrip($fleet, 'afternoon', '14:00:00');
+        $this->createStudent(['service_type' => 'dropoff_only', 'session_out' => '13:00:00', 'latitude' => -6.82100000, 'longitude' => 107.63100000]);
+        $this->createStudent(['service_type' => 'dropoff_only', 'session_out' => '13:00:00', 'latitude' => -6.82200000, 'longitude' => 107.63200000]);
+        $beforeSignature = $this->assignmentSignature();
+
+        $row = $this->benchmarkRow('afternoon');
+
+        $this->assertSame($beforeSignature, $this->assignmentSignature());
+        $this->assertSame(2, Student::whereNull('afternoon_fleet_trip_id')->count());
+        $this->assertSame(2, $row['students_processed']);
+        $this->assertSame(0, $row['students_allocated']);
+        $this->assertSame(2, $row['students_unallocated']);
+        $this->assertSame(0, $row['capacity_violations']);
+
+        return $this->scenarioSummary(
+            'Rit tidak tersedia',
+            '2 siswa pulang eligible sesi 13:00 tanpa rit aktif sesi tersebut',
+            $row,
+        );
+    }
+
+    private function resetBenchmarkFixture(): void
+    {
+        Student::query()->delete();
+        FleetTrip::query()->delete();
+        Fleet::query()->delete();
+        User::query()->delete();
+    }
+
+    private function benchmarkRow(string $direction): array
+    {
+        $result = app(RouteBenchmarkService::class)->run(['final'], 1, $direction);
+
+        return $result['rows'][0];
+    }
+
+    private function scenarioSummary(string $scenario, string $dataCondition, array $row): array
+    {
+        return [
+            'scenario' => $scenario,
+            'data_condition' => $dataCondition,
+            'students_processed' => $row['students_processed'],
+            'students_allocated' => $row['students_allocated'],
+            'students_unallocated' => $row['students_unallocated'],
+            'capacity_violations' => $row['capacity_violations'],
+            'status' => 'passed',
+        ];
+    }
+
     private function seedBenchmarkFixture(): void
     {
         $firstFleet = $this->createFleet(capacity: 2, latitude: -6.82000000, longitude: 107.63000000);

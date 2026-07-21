@@ -179,7 +179,8 @@ class RouteBenchmarkService
      */
     private function solveContext(array $context, string $method): array
     {
-        $students = $this->validStudents($this->cloneStudents($context['students']));
+        $eligibleStudents = $this->cloneStudents($context['students']);
+        $students = $this->validStudents($eligibleStudents);
         $trips = $context['trips'];
         $tripStudents = $this->initializeTripStudents($trips);
 
@@ -238,7 +239,7 @@ class RouteBenchmarkService
             'method' => $method,
             'direction' => $context['direction'],
             'session' => $context['session'],
-            'processed_student_ids' => $students->pluck('id')->values()->all(),
+            'processed_student_ids' => $eligibleStudents->pluck('id')->values()->all(),
             'trips' => $tripSolutions,
         ];
     }
