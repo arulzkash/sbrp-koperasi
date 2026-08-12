@@ -124,6 +124,8 @@ Route::middleware('auth')->group(function () {
 });
 
 Route::get('/admin/dashboard', [RouteController::class, 'index'])->name('admin.dashboard');
+Route::get('/admin/routes/visualization', [RouteController::class, 'visualization'])
+    ->name('admin.routes.visualization');
 Route::post('/admin/dashboard/generate/morning', [RouteController::class, 'generateMorning'])
     ->name('admin.routes.generate.morning');
 Route::post('/admin/dashboard/generate/afternoon', [RouteController::class, 'generateAfternoon'])

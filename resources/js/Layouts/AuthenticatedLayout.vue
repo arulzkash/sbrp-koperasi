@@ -21,6 +21,11 @@ const navigationLinks = computed(() => {
                 href: route("admin.dashboard"),
                 active: route().current("admin.dashboard"),
             },
+            {
+                label: "Visualisasi Algoritma",
+                href: route("admin.routes.visualization"),
+                active: route().current("admin.routes.visualization"),
+            },
         ];
     }
 

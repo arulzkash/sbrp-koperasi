@@ -51,6 +51,25 @@ class RouteController extends Controller
         ]);
     }
 
+    public function visualization(Request $request)
+    {
+        if (Auth::user()?->role !== 'manager') {
+            abort(403);
+        }
+
+        $direction = $request->query('direction', 'morning');
+        $direction = in_array($direction, ['morning', 'afternoon'], true) ? $direction : 'morning';
+        $session = $request->query('session');
+        $trace = $this->optimizer->buildVisualizationTrace($direction, $session);
+
+        return Inertia::render('Admin/RouteVisualization', [
+            'trace' => $trace,
+            'direction' => $trace['direction'],
+            'session' => $trace['session'],
+            'availableSessions' => $trace['available_sessions'],
+        ]);
+    }
+
     public function generateMorning(Request $request)
     {
         if (Auth::user()?->role !== 'manager') {

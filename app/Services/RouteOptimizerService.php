@@ -61,6 +61,313 @@ class RouteOptimizerService
         $this->refreshPaidStudentStatuses();
     }
 
+    public function buildVisualizationTrace(string $direction = 'morning', ?string $session = null): array
+    {
+        if ($direction === 'afternoon') {
+            return $this->buildAfternoonVisualizationTrace($session);
+        }
+
+        return $this->buildMorningVisualizationTrace();
+    }
+
+    private function buildMorningVisualizationTrace(): array
+    {
+        $trips = FleetTrip::with('fleet')
+            ->where('direction', 'morning')
+            ->where('is_active', true)
+            ->whereHas('fleet', fn ($query) => $query->where('is_active', true))
+            ->orderBy('departure_time')
+            ->orderBy('fleet_id')
+            ->orderBy('trip_order')
+            ->get();
+
+        $students = Student::where('payment_status', 'paid')
+            ->whereIn('service_type', ['full', 'pickup_only'])
+            ->get();
+
+        return $this->buildDirectionalVisualizationTrace(
+            direction: 'morning',
+            trips: $trips,
+            students: $students,
+            session: null,
+            availableSessions: [],
+        );
+    }
+
+    private function buildAfternoonVisualizationTrace(?string $requestedSession = null): array
+    {
+        $studentsAll = Student::where('payment_status', 'paid')
+            ->whereIn('service_type', ['full', 'dropoff_only'])
+            ->get();
+
+        $availableSessions = $studentsAll
+            ->map(fn (Student $student) => $this->normalizeSessionTime($student->session_out))
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        $session = $this->normalizeSessionTime($requestedSession) ?: ($availableSessions[0] ?? null);
+        $students = $session
+            ? $studentsAll->filter(fn (Student $student) => $this->normalizeSessionTime($student->session_out) === $session)->values()
+            : collect();
+
+        $trips = $session
+            ? FleetTrip::with('fleet')
+                ->where('direction', 'afternoon')
+                ->where('departure_time', $session)
+                ->where('is_active', true)
+                ->whereHas('fleet', fn ($query) => $query->where('is_active', true))
+                ->orderBy('fleet_id')
+                ->orderBy('trip_order')
+                ->get()
+            : collect();
+
+        return $this->buildDirectionalVisualizationTrace(
+            direction: 'afternoon',
+            trips: $trips,
+            students: $students,
+            session: $session,
+            availableSessions: $availableSessions,
+        );
+    }
+
+    private function buildDirectionalVisualizationTrace(string $direction, $trips, $students, ?string $session, array $availableSessions): array
+    {
+        $tripStudents = [];
+        $tripCapacities = [];
+        $validStudents = [];
+        $invalidStudents = 0;
+        $events = [];
+
+        foreach ($trips as $trip) {
+            $tripStudents[$trip->id] = [];
+            $tripCapacities[$trip->id] = $trip->fleet->capacity;
+        }
+
+        foreach ($students as $student) {
+            if (! $this->hasValidCoordinates($student)) {
+                $invalidStudents++;
+                continue;
+            }
+
+            $student->school_distance = $this->calculateDistance(
+                self::SCHOOL_LAT,
+                self::SCHOOL_LNG,
+                $student->latitude,
+                $student->longitude,
+            );
+            $validStudents[] = $student;
+        }
+
+        $events[] = $this->makeTraceEvent(
+            'filter',
+            'Filter siswa dan rit aktif',
+            $direction === 'morning'
+                ? 'Siswa lunas dengan layanan full atau pickup_only dipasangkan ke rit pagi aktif.'
+                : 'Siswa lunas dengan layanan full atau dropoff_only difilter lagi berdasarkan sesi jam pulang.',
+            $tripStudents,
+            [
+                'eligible_students_count' => count($validStudents),
+                'invalid_students_count' => $invalidStudents,
+                'available_trips_count' => $trips->count(),
+            ],
+        );
+
+        usort($validStudents, function ($a, $b) {
+            return $b->school_distance <=> $a->school_distance;
+        });
+
+        $events[] = $this->makeTraceEvent(
+            'sort',
+            'Urutkan siswa terjauh lebih dulu',
+            'Heuristik memproses siswa dari jarak Haversine terjauh terhadap sekolah agar titik yang sulit ditempatkan diprioritaskan.',
+            $tripStudents,
+            [
+                'sorted_student_ids' => array_map(fn (Student $student) => $student->id, $validStudents),
+            ],
+        );
+
+        foreach ($validStudents as $student) {
+            $bestTripId = null;
+            $bestScore = INF;
+            $scoreRows = [];
+
+            foreach ($trips as $trip) {
+                $tripId = $trip->id;
+                $currentStudents = $tripStudents[$tripId];
+                $capacity = $tripCapacities[$tripId];
+
+                if (count($currentStudents) >= $capacity) {
+                    $scoreRows[] = $this->makeScoreRow($trip, count($currentStudents), $capacity, null, null, null, null, false);
+                    continue;
+                }
+
+                if ($direction === 'morning') {
+                    $currentDistance = $this->estimateMorningRouteDistance($currentStudents, $trip->fleet);
+                    $newDistance = $this->estimateMorningRouteDistance([...$currentStudents, $student], $trip->fleet);
+                } else {
+                    $currentDistance = $this->estimateAfternoonRouteDistance($currentStudents);
+                    $newDistance = $this->estimateAfternoonRouteDistance([...$currentStudents, $student]);
+                }
+
+                $insertionCost = $newDistance - $currentDistance;
+                $loadRatio = $capacity > 0 ? count($currentStudents) / $capacity : 1;
+                $capacityPenalty = $loadRatio * 0.3;
+                $outlierPenalty = $this->calculateDistanceToTripCentroid($student, $currentStudents) * 0.15;
+                $score = $insertionCost + $capacityPenalty + $outlierPenalty;
+
+                $scoreRows[] = $this->makeScoreRow(
+                    $trip,
+                    count($currentStudents),
+                    $capacity,
+                    $insertionCost,
+                    $capacityPenalty,
+                    $outlierPenalty,
+                    $score,
+                    true,
+                );
+
+                if ($score < $bestScore) {
+                    $bestScore = $score;
+                    $bestTripId = $tripId;
+                }
+            }
+
+            if ($bestTripId !== null) {
+                $tripStudents[$bestTripId][] = $student;
+            }
+
+            $events[] = $this->makeTraceEvent(
+                'insertion',
+                'Hitung skor penyisipan: '.$student->name,
+                $bestTripId === null
+                    ? 'Tidak ada rit yang masih memiliki kapasitas.'
+                    : 'Rit dengan total skor terkecil dipilih untuk siswa ini.',
+                $tripStudents,
+                [
+                    'active_student_id' => $student->id,
+                    'selected_trip_id' => $bestTripId,
+                    'score_rows' => array_map(function (array $row) use ($bestTripId) {
+                        $row['selected'] = $row['trip_id'] === $bestTripId;
+
+                        return $row;
+                    }, $scoreRows),
+                ],
+            );
+        }
+
+        $tripStudents = $direction === 'morning'
+            ? $this->improveMorningAssignmentByMove($tripStudents, $trips, $events)
+            : $this->improveAfternoonAssignmentByMove($tripStudents, $trips, $session, $events);
+
+        $tripStudents = $direction === 'morning'
+            ? $this->rebalanceMorningUnderfilledTrips($tripStudents, $trips, $events)
+            : $this->rebalanceAfternoonUnderfilledTrips($tripStudents, $trips, $session, $events);
+
+        $finalRoutes = [];
+
+        foreach ($tripStudents as $tripId => $studentsForTrip) {
+            if (empty($studentsForTrip)) {
+                continue;
+            }
+
+            $trip = $trips->firstWhere('id', $tripId);
+            $nearestSteps = [];
+            $twoOptMoves = [];
+            $twoOptEvaluatedCandidates = 0;
+
+            if ($direction === 'morning') {
+                $nearestRoute = $this->buildNearestNeighborMorningRoute($studentsForTrip, $trip->fleet, $nearestSteps);
+                $nearestDistance = $this->routeDistanceMorning($nearestRoute, $trip->fleet->base_latitude, $trip->fleet->base_longitude);
+                $optimizedRoute = $this->twoOptMorning(
+                    $nearestRoute,
+                    $trip->fleet->base_latitude,
+                    $trip->fleet->base_longitude,
+                    $twoOptMoves,
+                    $twoOptEvaluatedCandidates,
+                );
+                $optimizedDistance = $this->routeDistanceMorning($optimizedRoute, $trip->fleet->base_latitude, $trip->fleet->base_longitude);
+            } else {
+                $nearestRoute = $this->buildNearestNeighborAfternoonRoute($studentsForTrip, $nearestSteps);
+                $nearestDistance = $this->routeDistanceAfternoon($nearestRoute);
+                $optimizedRoute = $this->twoOptAfternoon($nearestRoute, $twoOptMoves, $twoOptEvaluatedCandidates);
+                $optimizedDistance = $this->routeDistanceAfternoon($optimizedRoute);
+            }
+
+            $events[] = $this->makeTraceEvent(
+                'nearest_neighbor',
+                'Nearest neighbor: '.$this->formatTraceTripLabel($trip),
+                $direction === 'morning'
+                    ? 'Urutan awal dibangun dari lokasi pool armada menuju siswa terdekat berikutnya, lalu berakhir di sekolah.'
+                    : 'Urutan awal dibangun dari sekolah menuju siswa terdekat berikutnya.',
+                $tripStudents,
+                [
+                    'active_trip_id' => $trip->id,
+                    'route_student_ids' => array_map(fn (Student $student) => $student->id, $nearestRoute),
+                    'route_distance_km' => $this->roundTraceNumber($nearestDistance),
+                    'steps' => $nearestSteps,
+                ],
+            );
+
+            $finalRoutes[$tripId] = array_map(fn (Student $student) => $student->id, $optimizedRoute);
+
+            $events[] = $this->makeTraceEvent(
+                'two_opt',
+                'Perbaikan 2-opt: '.$this->formatTraceTripLabel($trip),
+                'Segmen rute dibalik hanya jika total jarak Haversine menjadi lebih pendek.',
+                $tripStudents,
+                [
+                    'active_trip_id' => $trip->id,
+                    'route_before_ids' => array_map(fn (Student $student) => $student->id, $nearestRoute),
+                    'route_student_ids' => $finalRoutes[$tripId],
+                    'distance_before_km' => $this->roundTraceNumber($nearestDistance),
+                    'distance_after_km' => $this->roundTraceNumber($optimizedDistance),
+                    'distance_delta_km' => $this->roundTraceNumber($optimizedDistance - $nearestDistance),
+                    'accepted_moves' => $twoOptMoves,
+                    'accepted_move_count' => count($twoOptMoves),
+                    'evaluated_candidates' => $twoOptEvaluatedCandidates,
+                ],
+            );
+        }
+
+        $events[] = $this->makeTraceEvent(
+            'road_geometry',
+            'Finalisasi visual rute',
+            'Urutan siswa hasil heuristik dikirim ke tampilan peta; geometri jalan OSRM hanya dipakai untuk menggambar polyline di dashboard.',
+            $tripStudents,
+            [
+                'final_routes' => $finalRoutes,
+            ],
+        );
+
+        foreach ($validStudents as $student) {
+            unset($student->school_distance);
+        }
+
+        return [
+            'direction' => $direction,
+            'direction_label' => $direction === 'morning' ? 'Rute Pagi' : 'Rute Pulang',
+            'session' => $session,
+            'available_sessions' => $availableSessions,
+            'school' => [
+                'name' => 'Sekolah',
+                'latitude' => self::SCHOOL_LAT,
+                'longitude' => self::SCHOOL_LNG,
+            ],
+            'trips' => $this->mapTripsForTrace($trips),
+            'students' => array_map(fn (Student $student) => $this->mapStudentForTrace($student), $validStudents),
+            'summary' => [
+                'eligible_students' => count($validStudents),
+                'invalid_students' => $invalidStudents,
+                'assigned_students' => array_sum($this->summarizeTripLoads($tripStudents)),
+                'active_trips' => $trips->count(),
+            ],
+            'events' => $this->withTraceEventNumbers($events),
+        ];
+    }
+
     private function refreshPaidStudentStatuses(): void
     {
         Student::where('payment_status', 'paid')
@@ -303,7 +610,7 @@ class RouteOptimizerService
         return $tripStudents;
     }
 
-    private function improveMorningAssignmentByMove(array $tripStudents, $trips): array
+    private function improveMorningAssignmentByMove(array $tripStudents, $trips, ?array &$traceEvents = null): array
     {
         $start = microtime(true);
         $maxIterations = 5;
@@ -346,6 +653,23 @@ class RouteOptimizerService
                             $improved = true;
                             $movesApplied++;
 
+                            if ($traceEvents !== null) {
+                                $traceEvents[] = $this->makeTraceEvent(
+                                    'local_move',
+                                    'Local move: '.$student->name,
+                                    'Siswa dipindahkan karena total estimasi jarak dua rit menjadi lebih pendek.',
+                                    $tripStudents,
+                                    [
+                                        'active_student_id' => $student->id,
+                                        'source_trip_id' => $fromTripId,
+                                        'destination_trip_id' => $toTripId,
+                                        'distance_before_km' => $this->roundTraceNumber($before),
+                                        'distance_after_km' => $this->roundTraceNumber($after),
+                                        'distance_delta_km' => $this->roundTraceNumber($after - $before),
+                                    ],
+                                );
+                            }
+
                             continue 4;
                         }
                     }
@@ -359,10 +683,23 @@ class RouteOptimizerService
             'trip_loads' => $this->summarizeTripLoads($tripStudents),
         ]);
 
+        if ($traceEvents !== null && $movesApplied === 0) {
+            $traceEvents[] = $this->makeTraceEvent(
+                'local_move',
+                'Local move selesai',
+                'Tidak ada perpindahan siswa yang membuat total estimasi jarak lebih pendek.',
+                $tripStudents,
+                [
+                    'moves_applied' => 0,
+                    'iterations' => $iteration,
+                ],
+            );
+        }
+
         return $tripStudents;
     }
 
-    private function rebalanceMorningUnderfilledTrips(array $tripStudents, $trips): array
+    private function rebalanceMorningUnderfilledTrips(array $tripStudents, $trips, ?array &$traceEvents = null): array
     {
         $start = microtime(true);
         $underfilledRatio = 0.65;
@@ -420,11 +757,20 @@ class RouteOptimizerService
 
                         if ($bestMove === null || $extraDistance < $bestMove['extra_distance']) {
                             $bestMove = [
+                                'student_id' => $student->id,
                                 'source_trip_id' => $sourceTripId,
                                 'destination_trip_id' => $destinationTripId,
                                 'source_students' => $sourceStudentsAfterMove,
                                 'destination_students' => $destinationStudentsAfterMove,
+                                'distance_before' => $before,
+                                'distance_after' => $after,
                                 'extra_distance' => $extraDistance,
+                                'source_load_before' => count($sourceStudents),
+                                'source_load_after' => count($sourceStudentsAfterMove),
+                                'source_capacity' => $sourceTrip->fleet->capacity,
+                                'destination_load_before' => count($destinationStudents),
+                                'destination_load_after' => count($destinationStudentsAfterMove),
+                                'destination_capacity' => $destinationTrip->fleet->capacity,
                             ];
                         }
                     }
@@ -439,6 +785,33 @@ class RouteOptimizerService
             $tripStudents[$bestMove['source_trip_id']] = $bestMove['source_students'];
             $tripStudents[$bestMove['destination_trip_id']] = $bestMove['destination_students'];
             $movesApplied++;
+
+            if ($traceEvents !== null) {
+                $traceEvents[] = $this->makeTraceEvent(
+                    'rebalance',
+                    'Soft rebalance rit',
+                    'Satu siswa dipindahkan dari rit yang sangat penuh ke rit yang masih longgar dengan tambahan jarak kecil.',
+                    $tripStudents,
+                    [
+                        'active_student_id' => $bestMove['student_id'],
+                        'source_trip_id' => $bestMove['source_trip_id'],
+                        'destination_trip_id' => $bestMove['destination_trip_id'],
+                        'distance_before_km' => $this->roundTraceNumber($bestMove['distance_before']),
+                        'distance_after_km' => $this->roundTraceNumber($bestMove['distance_after']),
+                        'distance_delta_km' => $this->roundTraceNumber($bestMove['extra_distance']),
+                        'extra_distance_km' => $this->roundTraceNumber($bestMove['extra_distance']),
+                        'source_load_before' => $bestMove['source_load_before'],
+                        'source_load_after' => $bestMove['source_load_after'],
+                        'source_capacity' => $bestMove['source_capacity'],
+                        'destination_load_before' => $bestMove['destination_load_before'],
+                        'destination_load_after' => $bestMove['destination_load_after'],
+                        'destination_capacity' => $bestMove['destination_capacity'],
+                        'underfilled_ratio' => $underfilledRatio,
+                        'overfilled_ratio' => $overfilledRatio,
+                        'max_extra_distance_km' => $maxExtraDistanceKm,
+                    ],
+                );
+            }
         }
 
         $this->logOptimizerTime('Morning rebalance finished', $start, [
@@ -446,6 +819,22 @@ class RouteOptimizerService
             'moves_applied' => $movesApplied,
             'trip_loads' => $this->summarizeTripLoads($tripStudents),
         ]);
+
+        if ($traceEvents !== null && $movesApplied === 0) {
+            $traceEvents[] = $this->makeTraceEvent(
+                'rebalance',
+                'Soft rebalance selesai',
+                'Tidak ada rit yang memenuhi syarat pemindahan lunak: sumber harus sangat penuh, tujuan masih longgar, dan tambahan jarak dibatasi 1.5 km.',
+                $tripStudents,
+                [
+                    'moves_applied' => 0,
+                    'iterations' => $iteration,
+                    'underfilled_ratio' => $underfilledRatio,
+                    'overfilled_ratio' => $overfilledRatio,
+                    'max_extra_distance_km' => $maxExtraDistanceKm,
+                ],
+            );
+        }
 
         return $tripStudents;
     }
@@ -527,6 +916,195 @@ class RouteOptimizerService
         return $summary;
     }
 
+    private function makeTraceEvent(string $phase, string $title, string $description, array $tripStudents, array $extra = []): array
+    {
+        return array_merge([
+            'phase' => $phase,
+            'title' => $title,
+            'description' => $description,
+            'trip_loads' => $this->snapshotTripLoads($tripStudents),
+            'load_counts' => $this->summarizeTripLoads($tripStudents),
+        ], $extra);
+    }
+
+    private function snapshotTripLoads(array $tripStudents): array
+    {
+        $snapshot = [];
+
+        foreach ($tripStudents as $tripId => $students) {
+            $snapshot[$tripId] = array_map(fn (Student $student) => $student->id, array_values($students));
+        }
+
+        return $snapshot;
+    }
+
+    private function makeScoreRow($trip, int $currentLoad, int $capacity, ?float $insertionCost, ?float $capacityPenalty, ?float $outlierPenalty, ?float $score, bool $available): array
+    {
+        return [
+            'trip_id' => $trip->id,
+            'trip_label' => $this->formatTraceTripLabel($trip),
+            'current_load' => $currentLoad,
+            'capacity' => $capacity,
+            'available' => $available,
+            'insertion_cost_km' => $this->roundTraceNumber($insertionCost),
+            'capacity_penalty' => $this->roundTraceNumber($capacityPenalty),
+            'outlier_penalty' => $this->roundTraceNumber($outlierPenalty),
+            'score' => $this->roundTraceNumber($score),
+        ];
+    }
+
+    private function mapTripsForTrace($trips): array
+    {
+        return $trips->map(function ($trip) {
+            return [
+                'id' => $trip->id,
+                'label' => $this->formatTraceTripLabel($trip),
+                'direction' => $trip->direction,
+                'departure_time' => $this->normalizeSessionTime($trip->departure_time),
+                'departure_label' => substr($this->normalizeSessionTime($trip->departure_time), 0, 5),
+                'trip_order' => $trip->trip_order,
+                'capacity' => (int) $trip->fleet->capacity,
+                'fleet' => [
+                    'id' => $trip->fleet->id,
+                    'name' => $trip->fleet->name,
+                    'driver_name' => $trip->fleet->driver_name,
+                    'license_plate' => $trip->fleet->license_plate,
+                    'base_latitude' => (float) $trip->fleet->base_latitude,
+                    'base_longitude' => (float) $trip->fleet->base_longitude,
+                    'base_address' => $trip->fleet->base_address,
+                ],
+            ];
+        })->values()->all();
+    }
+
+    private function mapStudentForTrace(Student $student): array
+    {
+        $schoolDistance = $student->school_distance ?? $this->calculateDistance(
+            self::SCHOOL_LAT,
+            self::SCHOOL_LNG,
+            $student->latitude,
+            $student->longitude,
+        );
+
+        return [
+            'id' => $student->id,
+            'name' => $student->name,
+            'school_level' => $student->school_level,
+            'class_room' => $student->class_room,
+            'class_room_note' => $student->class_room_note,
+            'service_type' => $student->service_type,
+            'session_in' => $this->normalizeSessionTime($student->session_in),
+            'session_out' => $this->normalizeSessionTime($student->session_out),
+            'latitude' => (float) $student->latitude,
+            'longitude' => (float) $student->longitude,
+            'school_distance_km' => $this->roundTraceNumber($schoolDistance),
+        ];
+    }
+
+    private function formatTraceTripLabel($trip): string
+    {
+        $time = substr($this->normalizeSessionTime($trip->departure_time), 0, 5);
+
+        return $trip->fleet->name.' - Rit '.$trip->trip_order.' ('.$time.')';
+    }
+
+    private function roundTraceNumber(?float $value): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        return round($value, 3);
+    }
+
+    private function makeTracePoint(
+        ?Student $student = null,
+        string $type = 'student',
+        ?string $label = null,
+        ?float $latitude = null,
+        ?float $longitude = null,
+    ): array {
+        if ($student) {
+            return [
+                'type' => 'student',
+                'student_id' => $student->id,
+                'label' => $student->name,
+                'latitude' => (float) $student->latitude,
+                'longitude' => (float) $student->longitude,
+            ];
+        }
+
+        return [
+            'type' => $type,
+            'student_id' => null,
+            'label' => $label ?? ucfirst(str_replace('_', ' ', $type)),
+            'latitude' => $latitude,
+            'longitude' => $longitude,
+        ];
+    }
+
+    private function makeTraceEdge(array $from, array $to): array
+    {
+        return [
+            'from' => $from,
+            'to' => $to,
+        ];
+    }
+
+    private function makeTwoOptTraceMove(
+        int $move,
+        int $pass,
+        int $startIndex,
+        int $endIndex,
+        array $routeBefore,
+        array $routeAfter,
+        array $predecessor,
+        array $first,
+        array $last,
+        ?array $successor,
+        float $distanceBefore,
+        float $distanceAfter,
+    ): array {
+        $removedEdges = [$this->makeTraceEdge($predecessor, $first)];
+        $addedEdges = [$this->makeTraceEdge($predecessor, $last)];
+
+        if ($successor) {
+            $removedEdges[] = $this->makeTraceEdge($last, $successor);
+            $addedEdges[] = $this->makeTraceEdge($first, $successor);
+        }
+
+        return [
+            'move' => $move,
+            'pass' => $pass,
+            'start_position' => $startIndex + 1,
+            'end_position' => $endIndex + 1,
+            'route_before_ids' => array_map(fn (Student $student) => $student->id, $routeBefore),
+            'route_after_ids' => array_map(fn (Student $student) => $student->id, $routeAfter),
+            'segment_before_ids' => array_map(
+                fn (Student $student) => $student->id,
+                array_slice($routeBefore, $startIndex, $endIndex - $startIndex + 1),
+            ),
+            'segment_after_ids' => array_map(
+                fn (Student $student) => $student->id,
+                array_slice($routeAfter, $startIndex, $endIndex - $startIndex + 1),
+            ),
+            'removed_edges' => $removedEdges,
+            'added_edges' => $addedEdges,
+            'distance_before_km' => $this->roundTraceNumber($distanceBefore),
+            'distance_after_km' => $this->roundTraceNumber($distanceAfter),
+            'distance_delta_km' => $this->roundTraceNumber($distanceAfter - $distanceBefore),
+        ];
+    }
+
+    private function withTraceEventNumbers(array $events): array
+    {
+        return array_map(function (array $event, int $index) {
+            $event['id'] = $index + 1;
+
+            return $event;
+        }, array_values($events), array_keys(array_values($events)));
+    }
+
     private function tripLoadRatio(array $students, int $capacity): float
     {
         if ($capacity <= 0) {
@@ -543,19 +1121,32 @@ class RouteOptimizerService
         return $this->routeDistanceMorning($route, $fleet->base_latitude, $fleet->base_longitude);
     }
 
-    private function buildNearestNeighborMorningRoute(array $students, $fleet): array
+    private function buildNearestNeighborMorningRoute(array $students, $fleet, ?array &$traceSteps = null): array
     {
         $unvisited = array_values($students);
         $route = [];
         $currentLat = $fleet->base_latitude;
         $currentLng = $fleet->base_longitude;
+        $currentPoint = $this->makeTracePoint(
+            null,
+            'fleet_base',
+            'Pool armada',
+            (float) $fleet->base_latitude,
+            (float) $fleet->base_longitude,
+        );
 
         while (! empty($unvisited)) {
             $nearestIndex = -1;
             $minDist = INF;
+            $candidateRows = [];
 
             foreach ($unvisited as $index => $student) {
                 $dist = $this->calculateDistance($currentLat, $currentLng, $student->latitude, $student->longitude);
+                $candidateRows[] = [
+                    'student_id' => $student->id,
+                    'student_name' => $student->name,
+                    'distance_km' => $this->roundTraceNumber($dist),
+                ];
 
                 if ($dist < $minDist) {
                     $minDist = $dist;
@@ -564,9 +1155,33 @@ class RouteOptimizerService
             }
 
             $nearestStudent = $unvisited[$nearestIndex];
+            $routeBeforeIds = array_map(fn (Student $student) => $student->id, $route);
             $route[] = $nearestStudent;
+
+            if ($traceSteps !== null) {
+                usort($candidateRows, fn (array $a, array $b) => $a['distance_km'] <=> $b['distance_km']);
+
+                $traceSteps[] = [
+                    'step' => count($traceSteps) + 1,
+                    'current_point' => $currentPoint,
+                    'candidate_rows' => array_map(function (array $row) use ($nearestStudent) {
+                        $row['selected'] = (int) $row['student_id'] === (int) $nearestStudent->id;
+
+                        return $row;
+                    }, $candidateRows),
+                    'selected_student_id' => $nearestStudent->id,
+                    'selected_student_name' => $nearestStudent->name,
+                    'selected_distance_km' => $this->roundTraceNumber($minDist),
+                    'route_before_ids' => $routeBeforeIds,
+                    'route_after_ids' => array_map(fn (Student $student) => $student->id, $route),
+                    'unvisited_before' => count($unvisited),
+                    'unvisited_after' => count($unvisited) - 1,
+                ];
+            }
+
             $currentLat = $nearestStudent->latitude;
             $currentLng = $nearestStudent->longitude;
+            $currentPoint = $this->makeTracePoint($nearestStudent);
 
             array_splice($unvisited, $nearestIndex, 1);
         }
@@ -629,22 +1244,63 @@ class RouteOptimizerService
         return $this->twoOptMorning($route, $fleet->base_latitude, $fleet->base_longitude);
     }
 
-    private function twoOptMorning($route, $baseLat, $baseLng)
+    private function twoOptMorning(
+        $route,
+        $baseLat,
+        $baseLng,
+        ?array &$traceMoves = null,
+        ?int &$evaluatedCandidates = null,
+    )
     {
         $improved = true;
+        $pass = 0;
 
         while ($improved) {
             $improved = false;
+            $pass++;
 
             for ($i = 0; $i < count($route) - 1; $i++) {
                 for ($j = $i + 1; $j < count($route); $j++) {
+                    if ($evaluatedCandidates !== null) {
+                        $evaluatedCandidates++;
+                    }
+
                     $newRoute = $route;
 
                     $segment = array_slice($newRoute, $i, $j - $i + 1);
                     $segment = array_reverse($segment);
                     array_splice($newRoute, $i, $j - $i + 1, $segment);
 
-                    if ($this->routeDistanceMorning($newRoute, $baseLat, $baseLng) < $this->routeDistanceMorning($route, $baseLat, $baseLng)) {
+                    $distanceBefore = $this->routeDistanceMorning($route, $baseLat, $baseLng);
+                    $distanceAfter = $this->routeDistanceMorning($newRoute, $baseLat, $baseLng);
+
+                    if ($distanceAfter < $distanceBefore) {
+                        if ($traceMoves !== null) {
+                            $predecessor = $i === 0
+                                ? $this->makeTracePoint(null, 'fleet_base', 'Pool armada', (float) $baseLat, (float) $baseLng)
+                                : $this->makeTracePoint($route[$i - 1]);
+                            $first = $this->makeTracePoint($route[$i]);
+                            $last = $this->makeTracePoint($route[$j]);
+                            $successor = $j === count($route) - 1
+                                ? $this->makeTracePoint(null, 'school', 'Sekolah', self::SCHOOL_LAT, self::SCHOOL_LNG)
+                                : $this->makeTracePoint($route[$j + 1]);
+
+                            $traceMoves[] = $this->makeTwoOptTraceMove(
+                                count($traceMoves) + 1,
+                                $pass,
+                                $i,
+                                $j,
+                                $route,
+                                $newRoute,
+                                $predecessor,
+                                $first,
+                                $last,
+                                $successor,
+                                $distanceBefore,
+                                $distanceAfter,
+                            );
+                        }
+
                         $route = $newRoute;
                         $improved = true;
                     }
@@ -892,7 +1548,7 @@ class RouteOptimizerService
         return $tripStudents;
     }
 
-    private function improveAfternoonAssignmentByMove(array $tripStudents, $trips, $session = null): array
+    private function improveAfternoonAssignmentByMove(array $tripStudents, $trips, $session = null, ?array &$traceEvents = null): array
     {
         $start = microtime(true);
         $maxIterations = 5;
@@ -930,6 +1586,23 @@ class RouteOptimizerService
                             $improved = true;
                             $movesApplied++;
 
+                            if ($traceEvents !== null) {
+                                $traceEvents[] = $this->makeTraceEvent(
+                                    'local_move',
+                                    'Local move: '.$student->name,
+                                    'Siswa dipindahkan karena total estimasi jarak dua rit menjadi lebih pendek.',
+                                    $tripStudents,
+                                    [
+                                        'active_student_id' => $student->id,
+                                        'source_trip_id' => $fromTripId,
+                                        'destination_trip_id' => $toTripId,
+                                        'distance_before_km' => $this->roundTraceNumber($before),
+                                        'distance_after_km' => $this->roundTraceNumber($after),
+                                        'distance_delta_km' => $this->roundTraceNumber($after - $before),
+                                    ],
+                                );
+                            }
+
                             continue 4;
                         }
                     }
@@ -944,10 +1617,24 @@ class RouteOptimizerService
             'trip_loads' => $this->summarizeTripLoads($tripStudents),
         ]);
 
+        if ($traceEvents !== null && $movesApplied === 0) {
+            $traceEvents[] = $this->makeTraceEvent(
+                'local_move',
+                'Local move selesai',
+                'Tidak ada perpindahan siswa yang membuat total estimasi jarak lebih pendek.',
+                $tripStudents,
+                [
+                    'session' => $session,
+                    'moves_applied' => 0,
+                    'iterations' => $iteration,
+                ],
+            );
+        }
+
         return $tripStudents;
     }
 
-    private function rebalanceAfternoonUnderfilledTrips(array $tripStudents, $trips, $session = null): array
+    private function rebalanceAfternoonUnderfilledTrips(array $tripStudents, $trips, $session = null, ?array &$traceEvents = null): array
     {
         $start = microtime(true);
         $underfilledRatio = 0.65;
@@ -1001,11 +1688,20 @@ class RouteOptimizerService
 
                         if ($bestMove === null || $extraDistance < $bestMove['extra_distance']) {
                             $bestMove = [
+                                'student_id' => $student->id,
                                 'source_trip_id' => $sourceTripId,
                                 'destination_trip_id' => $destinationTripId,
                                 'source_students' => $sourceStudentsAfterMove,
                                 'destination_students' => $destinationStudentsAfterMove,
+                                'distance_before' => $before,
+                                'distance_after' => $after,
                                 'extra_distance' => $extraDistance,
+                                'source_load_before' => count($sourceStudents),
+                                'source_load_after' => count($sourceStudentsAfterMove),
+                                'source_capacity' => $sourceTrip->fleet->capacity,
+                                'destination_load_before' => count($destinationStudents),
+                                'destination_load_after' => count($destinationStudentsAfterMove),
+                                'destination_capacity' => $destinationTrip->fleet->capacity,
                             ];
                         }
                     }
@@ -1020,6 +1716,34 @@ class RouteOptimizerService
             $tripStudents[$bestMove['source_trip_id']] = $bestMove['source_students'];
             $tripStudents[$bestMove['destination_trip_id']] = $bestMove['destination_students'];
             $movesApplied++;
+
+            if ($traceEvents !== null) {
+                $traceEvents[] = $this->makeTraceEvent(
+                    'rebalance',
+                    'Soft rebalance rit',
+                    'Satu siswa dipindahkan dari rit yang sangat penuh ke rit yang masih longgar dengan tambahan jarak kecil.',
+                    $tripStudents,
+                    [
+                        'session' => $session,
+                        'active_student_id' => $bestMove['student_id'],
+                        'source_trip_id' => $bestMove['source_trip_id'],
+                        'destination_trip_id' => $bestMove['destination_trip_id'],
+                        'distance_before_km' => $this->roundTraceNumber($bestMove['distance_before']),
+                        'distance_after_km' => $this->roundTraceNumber($bestMove['distance_after']),
+                        'distance_delta_km' => $this->roundTraceNumber($bestMove['extra_distance']),
+                        'extra_distance_km' => $this->roundTraceNumber($bestMove['extra_distance']),
+                        'source_load_before' => $bestMove['source_load_before'],
+                        'source_load_after' => $bestMove['source_load_after'],
+                        'source_capacity' => $bestMove['source_capacity'],
+                        'destination_load_before' => $bestMove['destination_load_before'],
+                        'destination_load_after' => $bestMove['destination_load_after'],
+                        'destination_capacity' => $bestMove['destination_capacity'],
+                        'underfilled_ratio' => $underfilledRatio,
+                        'overfilled_ratio' => $overfilledRatio,
+                        'max_extra_distance_km' => $maxExtraDistanceKm,
+                    ],
+                );
+            }
         }
 
         $this->logOptimizerTime('Afternoon rebalance finished', $start, [
@@ -1028,6 +1752,23 @@ class RouteOptimizerService
             'moves_applied' => $movesApplied,
             'trip_loads' => $this->summarizeTripLoads($tripStudents),
         ]);
+
+        if ($traceEvents !== null && $movesApplied === 0) {
+            $traceEvents[] = $this->makeTraceEvent(
+                'rebalance',
+                'Soft rebalance selesai',
+                'Tidak ada rit yang memenuhi syarat pemindahan lunak: sumber harus sangat penuh, tujuan masih longgar, dan tambahan jarak dibatasi 2.0 km.',
+                $tripStudents,
+                [
+                    'session' => $session,
+                    'moves_applied' => 0,
+                    'iterations' => $iteration,
+                    'underfilled_ratio' => $underfilledRatio,
+                    'overfilled_ratio' => $overfilledRatio,
+                    'max_extra_distance_km' => $maxExtraDistanceKm,
+                ],
+            );
+        }
 
         return $tripStudents;
     }
@@ -1039,19 +1780,26 @@ class RouteOptimizerService
         return $this->routeDistanceAfternoon($route);
     }
 
-    private function buildNearestNeighborAfternoonRoute(array $students): array
+    private function buildNearestNeighborAfternoonRoute(array $students, ?array &$traceSteps = null): array
     {
         $unvisited = array_values($students);
         $route = [];
         $currentLat = self::SCHOOL_LAT;
         $currentLng = self::SCHOOL_LNG;
+        $currentPoint = $this->makeTracePoint(null, 'school', 'Sekolah', self::SCHOOL_LAT, self::SCHOOL_LNG);
 
         while (! empty($unvisited)) {
             $nearestIndex = -1;
             $minDist = INF;
+            $candidateRows = [];
 
             foreach ($unvisited as $index => $student) {
                 $dist = $this->calculateDistance($currentLat, $currentLng, $student->latitude, $student->longitude);
+                $candidateRows[] = [
+                    'student_id' => $student->id,
+                    'student_name' => $student->name,
+                    'distance_km' => $this->roundTraceNumber($dist),
+                ];
 
                 if ($dist < $minDist) {
                     $minDist = $dist;
@@ -1060,9 +1808,33 @@ class RouteOptimizerService
             }
 
             $nearestStudent = $unvisited[$nearestIndex];
+            $routeBeforeIds = array_map(fn (Student $student) => $student->id, $route);
             $route[] = $nearestStudent;
+
+            if ($traceSteps !== null) {
+                usort($candidateRows, fn (array $a, array $b) => $a['distance_km'] <=> $b['distance_km']);
+
+                $traceSteps[] = [
+                    'step' => count($traceSteps) + 1,
+                    'current_point' => $currentPoint,
+                    'candidate_rows' => array_map(function (array $row) use ($nearestStudent) {
+                        $row['selected'] = (int) $row['student_id'] === (int) $nearestStudent->id;
+
+                        return $row;
+                    }, $candidateRows),
+                    'selected_student_id' => $nearestStudent->id,
+                    'selected_student_name' => $nearestStudent->name,
+                    'selected_distance_km' => $this->roundTraceNumber($minDist),
+                    'route_before_ids' => $routeBeforeIds,
+                    'route_after_ids' => array_map(fn (Student $student) => $student->id, $route),
+                    'unvisited_before' => count($unvisited),
+                    'unvisited_after' => count($unvisited) - 1,
+                ];
+            }
+
             $currentLat = $nearestStudent->latitude;
             $currentLng = $nearestStudent->longitude;
+            $currentPoint = $this->makeTracePoint($nearestStudent);
 
             array_splice($unvisited, $nearestIndex, 1);
         }
@@ -1098,21 +1870,60 @@ class RouteOptimizerService
         return $this->twoOptAfternoon($route);
     }
 
-    private function twoOptAfternoon(array $route): array
+    private function twoOptAfternoon(
+        array $route,
+        ?array &$traceMoves = null,
+        ?int &$evaluatedCandidates = null,
+    ): array
     {
         $improved = true;
+        $pass = 0;
 
         while ($improved) {
             $improved = false;
+            $pass++;
 
             for ($i = 0; $i < count($route) - 1; $i++) {
                 for ($j = $i + 1; $j < count($route); $j++) {
+                    if ($evaluatedCandidates !== null) {
+                        $evaluatedCandidates++;
+                    }
+
                     $newRoute = $route;
                     $segment = array_slice($newRoute, $i, $j - $i + 1);
                     $segment = array_reverse($segment);
                     array_splice($newRoute, $i, $j - $i + 1, $segment);
 
-                    if ($this->routeDistanceAfternoon($newRoute) < $this->routeDistanceAfternoon($route)) {
+                    $distanceBefore = $this->routeDistanceAfternoon($route);
+                    $distanceAfter = $this->routeDistanceAfternoon($newRoute);
+
+                    if ($distanceAfter < $distanceBefore) {
+                        if ($traceMoves !== null) {
+                            $predecessor = $i === 0
+                                ? $this->makeTracePoint(null, 'school', 'Sekolah', self::SCHOOL_LAT, self::SCHOOL_LNG)
+                                : $this->makeTracePoint($route[$i - 1]);
+                            $first = $this->makeTracePoint($route[$i]);
+                            $last = $this->makeTracePoint($route[$j]);
+                            $successor = $j === count($route) - 1
+                                ? null
+                                : $this->makeTracePoint($route[$j + 1]);
+
+                            $traceMoves[] = $this->makeTwoOptTraceMove(
+                                count($traceMoves) + 1,
+                                $pass,
+                                $i,
+                                $j,
+                                $route,
+                                $newRoute,
+                                $predecessor,
+                                $first,
+                                $last,
+                                $successor,
+                                $distanceBefore,
+                                $distanceAfter,
+                            );
+                        }
+
                         $route = $newRoute;
                         $improved = true;
                     }

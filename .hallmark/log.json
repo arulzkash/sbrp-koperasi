@@ -1,0 +1,47 @@
+[
+  {
+    "date": "2026-08-11",
+    "macrostructure": "Narrative Workflow",
+    "theme": "system-managed",
+    "enrichment": "user-controlled live basemap with spiderfied teaching markers",
+    "nav": "existing app shell",
+    "footer": "none",
+    "brief": "Preserve map camera across micro-steps, clarify before-based 2-opt changes, and split allocation cleanup into Local Move and Soft Rebalance"
+  },
+  {
+    "date": "2026-08-10",
+    "macrostructure": "Narrative Workflow",
+    "theme": "system-managed",
+    "enrichment": "live basemap with algorithm micro-trace overlays",
+    "nav": "existing app shell",
+    "footer": "none",
+    "brief": "Explain Nearest Neighbor choices and accepted 2-opt edge changes with before-after impact"
+  },
+  {
+    "date": "2026-08-10",
+    "macrostructure": "Narrative Workflow",
+    "theme": "system-managed",
+    "enrichment": "live OpenStreetMap basemap",
+    "nav": "existing app shell",
+    "footer": "none",
+    "brief": "Refine algorithm playback with semantic color roles and cartographic hierarchy"
+  },
+  {
+    "date": "2026-08-10",
+    "macrostructure": "Narrative Workflow",
+    "theme": "system-managed",
+    "enrichment": "none",
+    "nav": "existing app shell",
+    "footer": "none",
+    "brief": "Turn route optimization playback into a stage-specific teaching narrative"
+  },
+  {
+    "date": "2026-08-10",
+    "macrostructure": "Workbench",
+    "theme": "system-managed",
+    "enrichment": "none",
+    "nav": "existing app shell",
+    "footer": "none",
+    "brief": "Simplify route algorithm visualization into thesis-friendly playback"
+  }
+]
